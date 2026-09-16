@@ -63,7 +63,15 @@ def get_db(db_path: Optional[str] = None) -> Generator[Any, None, None]:
         finally:
             POSTGRES_POOL.putconn(conn)
     else:
-        resolved = db_path if db_path is not None else DEFAULT_SQLITE_PATH
+        if db_path is not None:
+            resolved = db_path
+        else:
+            base_default = os.path.join(os.path.dirname(__file__), "..", "DATA", "monitoring.db")
+            from sanket import monitoring
+            if getattr(monitoring, "DEFAULT_DB_PATH", base_default) != base_default:
+                resolved = monitoring.DEFAULT_DB_PATH
+            else:
+                resolved = DEFAULT_SQLITE_PATH
         norm_path = os.path.abspath(resolved)
         os.makedirs(os.path.dirname(norm_path), exist_ok=True)
         conn = sqlite3.connect(norm_path, timeout=30.0)

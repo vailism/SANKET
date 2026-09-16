@@ -48,9 +48,15 @@ DEFAULT_PERSISTENCE_CYCLES = 2
 
 
 def resolve_db_path(override_path: Optional[str] = None) -> str:
-    """Resolve active database path, respecting monkeypatched DEFAULT_DB_PATH."""
+    """Resolve active database path, respecting monkeypatched DEFAULT_DB_PATH or db.DEFAULT_SQLITE_PATH."""
     if override_path is not None:
         return override_path
+    from sanket import db
+    base_default = os.path.join(os.path.dirname(__file__), "..", "DATA", "monitoring.db")
+    if DEFAULT_DB_PATH != base_default:
+        return DEFAULT_DB_PATH
+    if getattr(db, "DEFAULT_SQLITE_PATH", base_default) != base_default:
+        return db.DEFAULT_SQLITE_PATH
     return DEFAULT_DB_PATH
 
 
