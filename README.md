@@ -209,6 +209,19 @@ graph TB
     L1 --> L2 --> L3 --> L4 --> L5
 ```
 
+### Tech Stack & Justification
+
+| Technology | Role | Why we chose it |
+|---|---|---|
+| **Python 3.12** | Core language | Dominant in data science, enabling seamless ML integration alongside robust backend frameworks. |
+| **FastAPI** | Backend API | High performance, async support, and automatic OpenAPI documentation. Ideal for lightweight ML serving. |
+| **LightGBM** | ML Model | Natively handles missing values (crucial for sparse physical progress data) and non-linear interactions better than linear models, without the overhead of deep learning. |
+| **SQLite (WAL) / PostgreSQL** | Database | Dual-support. SQLite in WAL mode provides zero-config local persistence without blocking reads during ingestion; PostgreSQL scales for production deployment. |
+| **Pandas / PyArrow** | Data Pipeline | Fast vectorized transformations and Parquet I/O, enabling chunk-by-chunk processing within the 512MB RAM constraint. |
+| **Vanilla JS (HTML/CSS)** | Frontend | Zero-build simplicity. A government oversight tool should be trivial to deploy without complex Node.js toolchains. |
+| **Render** | Deployment | PaaS simplicity with predictable resource caps to prove the system's low-memory architecture. |
+| **Gemini 1.5 Flash** | AI Explanations | Extremely fast inference for synthesizing complex TreeSHAP attributions into natural language project briefs. |
+
 ### Design principles
 
 | Principle | How it is enforced |
