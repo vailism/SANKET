@@ -495,7 +495,7 @@ This is a logical **OR** between two conditions:
 | `cost_overrun_12m` | A **≥ 5%** increase in the revised cost baseline within 12 months |
 | `schedule_overrun_12m` | A **≥ 6.0 month** forward drift in the anticipated completion date or official schedule deviation within 12 months |
 
-$$\texttt{overrun\_composite\_12m}(t) = \texttt{cost\_overrun\_12m}(t) \; \lor \; \texttt{schedule\_overrun\_12m}(t)$$
+$$\texttt{overrun\\_composite\\_12m}(t) = \texttt{cost\\_overrun\\_12m}(t) \; \lor \; \texttt{schedule\\_overrun\\_12m}(t)$$
 
 Incomplete future windows — **right censoring** — are **excluded, not imputed as negative**.
 
