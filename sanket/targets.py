@@ -60,7 +60,16 @@ def compute_targets(
         df = df.sort_values(by=["project_id", "reporting_month"], ascending=[True, True]).reset_index(drop=True)
 
     # Convert reporting month to integer month index
-    df["report_month_int"] = df["reporting_month"].apply(ym_to_month_int)
+    def _ym_to_month_int_vectorized(series):
+        s = series.astype(str).str.strip().replace("nan", "")
+        parts = s.str.split("-", expand=True)
+        if parts.shape[1] >= 2:
+            y = pd.to_numeric(parts[0], errors="coerce")
+            m = pd.to_numeric(parts[1], errors="coerce")
+            return y * 12 + m
+        return pd.Series(np.nan, index=series.index)
+
+    df["report_month_int"] = _ym_to_month_int_vectorized(df["reporting_month"])
 
     # Point-in-time cost baseline C_base(t)
     app_cost = pd.to_numeric(df["approved_cost"], errors="coerce")
@@ -71,17 +80,9 @@ def compute_targets(
 
     df["C_base"] = np.where(~np.isnan(rev_cost_clean), rev_cost_clean, app_cost_clean)
 
-    # Point-in-time target completion date in integer months
-    def get_target_comp(r):
-        rev = str(r.get("revised_completion_date", "") or "").strip()
-        if rev and rev != "nan" and ym_to_month_int(rev) is not None:
-            return ym_to_month_int(rev)
-        orig = str(r.get("original_completion_date", "") or "").strip()
-        if orig and orig != "nan" and ym_to_month_int(orig) is not None:
-            return ym_to_month_int(orig)
-        return np.nan
-
-    df["target_comp_int"] = df.apply(get_target_comp, axis=1)
+    rev_nums = _ym_to_month_int_vectorized(df.get("revised_completion_date", pd.Series(np.nan, index=df.index)))
+    orig_nums = _ym_to_month_int_vectorized(df.get("original_completion_date", pd.Series(np.nan, index=df.index)))
+    df["target_comp_int"] = rev_nums.fillna(orig_nums)
     df["sch_dev_clean"] = pd.to_numeric(df["schedule_deviation"], errors="coerce")
 
     # Fast iteration by project to compute forward windows and historical eligibility

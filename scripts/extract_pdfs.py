@@ -187,7 +187,8 @@ def extract_from_modern_table(page: pymupdf.Page, page_num: int, filename: str, 
     """Extract rows from modern Table 6 / 7 (e.g. December 2024, July 2024)."""
     records = []
     tabs = page.find_tables()
-    for tab in tabs.tables:
+    tables_list = tabs.tables if tabs.tables else page.find_tables(strategy="text").tables
+    for tab in tables_list:
         rows = tab.extract()
         if not rows:
             continue
@@ -222,17 +223,33 @@ def extract_from_modern_table(page: pymupdf.Page, page_num: int, filename: str, 
             if not proj_cell or proj_cell in ["1", "2", "3", "4", "5", "6", "7", "(1)", "(2)", "(3)"]:
                 continue
                 
+            is_paimana = False
+            code = None
+            if re.match(r'^\d{6,8}$', proj_cell) and len(r) > sl_col + 2:
+                is_paimana = True
+                code = proj_cell
+                proj_cell = str(r[sl_col + 2] or "").strip()
+                
             proj_name = clean_project_title(proj_cell)
             if len(proj_name) < 3 or re.match(r'^\d+$', proj_name):
                 continue
                 
-            doa_cell = str(r[sl_col + 2] or "") if len(r) > sl_col + 2 else ""
-            doc_cell = str(r[sl_col + 3] or "") if len(r) > sl_col + 3 else ""
-            cost_cell = str(r[sl_col + 4] or "") if len(r) > sl_col + 4 else ""
-            exp_cell = str(r[sl_col + 5] or "") if len(r) > sl_col + 5 else ""
-            prog_cell = str(r[sl_col + 6] or "") if len(r) > sl_col + 6 else ""
+            if is_paimana:
+                doc_cell = ""
+                c_orig = str(r[sl_col + 3] or "").strip() if len(r) > sl_col + 3 else ""
+                c_rev = str(r[sl_col + 4] or "").strip() if len(r) > sl_col + 4 else ""
+                cost_cell = c_orig + "\n" + c_rev
+                exp_cell = str(r[sl_col + 5] or "").strip() if len(r) > sl_col + 5 else ""
+                prog_cell = str(r[sl_col + 6] or "").strip() if len(r) > sl_col + 6 else ""
+            else:
+                _ = str(r[sl_col + 2] or "") if len(r) > sl_col + 2 else ""
+                doc_cell = str(r[sl_col + 3] or "") if len(r) > sl_col + 3 else ""
+                cost_cell = str(r[sl_col + 4] or "") if len(r) > sl_col + 4 else ""
+                exp_cell = str(r[sl_col + 5] or "") if len(r) > sl_col + 5 else ""
+                prog_cell = str(r[sl_col + 6] or "") if len(r) > sl_col + 6 else ""
             
-            code = extract_project_code(proj_cell)
+            if not is_paimana:
+                code = extract_project_code(proj_cell)
             
             agency_matches = re.findall(r'\(([A-Za-z0-9\s\.\&\-]+)\)', proj_cell)
             agency_list = [a.strip() for a in agency_matches if not extract_project_code(a)]
@@ -251,7 +268,10 @@ def extract_from_modern_table(page: pymupdf.Page, page_num: int, filename: str, 
             
             fin_prog = round((norm_exp / norm_cost_orig * 100), 2) if (norm_exp and norm_cost_orig and norm_cost_orig > 0) else None
             
-            proj_id = normalize_project_id(code, proj_name, current_context.get("sector", ""), agency, current_context.get("state", ""))
+            if is_paimana and code:
+                proj_id = code  # Use PAIMANA 6-digit code directly
+            else:
+                proj_id = normalize_project_id(code, proj_name, current_context.get("sector", ""), agency, current_context.get("state", ""))
             if not proj_id or len(proj_name) < 3 or re.match(r'^\d+$', proj_name):
                 continue
             
@@ -283,7 +303,8 @@ def extract_from_classic_table(page: pymupdf.Page, page_num: int, filename: str,
     """Extract rows from Classic Flash Report Master Table or Annexures."""
     records = []
     tabs = page.find_tables()
-    for tab in tabs.tables:
+    tables_list = tabs.tables if tabs.tables else page.find_tables(strategy="text").tables
+    for tab in tables_list:
         rows = tab.extract()
         if not rows:
             continue
@@ -329,7 +350,7 @@ def extract_from_classic_table(page: pymupdf.Page, page_num: int, filename: str,
             if len(proj_name) < 3 or re.match(r'^\d+$', proj_name):
                 continue
                 
-            doa_cell = str(r[2] or "") if len(r) > 2 else ""
+            _ = str(r[2] or "") if len(r) > 2 else ""
             doc_cell = str(r[3] or "") if len(r) > 3 else ""
             cost_cell = str(r[4] or "") if len(r) > 4 else ""
             exp_cell = str(r[5] or "") if len(r) > 5 else ""
@@ -351,7 +372,7 @@ def extract_from_classic_table(page: pymupdf.Page, page_num: int, filename: str,
                     
             doc_orig, doc_rev, doc_antic = extract_multi_field(doc_cell)
             cost_orig, cost_rev, cost_antic = extract_multi_field(cost_cell)
-            exp_orig, cost_overrun, time_overrun = extract_multi_field(exp_cell)
+            exp_orig, _, time_overrun = extract_multi_field(exp_cell)
             
             norm_doc_orig = normalize_month(doc_orig)
             norm_doc_rev = normalize_month(doc_rev) or normalize_month(doc_antic)
@@ -418,9 +439,9 @@ def extract_from_qpsr_page(page: pymupdf.Page, page_num: int, filename: str, rep
         if len(data_row) < 7:
             continue
             
-        doa_cell = str(data_row[0] or "")
+        _ = str(data_row[0] or "")
         cost_cell = str(data_row[1] or "")
-        cost_overrun = str(data_row[2] or "")
+        _ = str(data_row[2] or "")
         doc_cell = str(data_row[3] or "")
         exp_cell = str(data_row[4] or "")
         time_overrun = str(data_row[5] or "")
@@ -548,7 +569,7 @@ def process_pdf(filepath: str, filename: str) -> Tuple[List[Dict[str, Any]], Dic
                 page_records = []
                 
                 if category == "MODERN_TABLE_7":
-                    if re.search(r'(?i)\bTable\s*[:-–]?\s*[67]\b|Project\s*List\s*:\s*Ongoing', p_text):
+                    if re.search(r'(?i)\bTable\s*[:-–]?\s*[67]\b|Project\s*List\s*:\s*Ongoing|Major\s+On-going\s+Projects\s+Monitored\s+under\s+PAIMANA', p_text):
                         page_records = extract_from_modern_table(page, p_num + 1, filename, rep_month, current_context)
                         
                 elif category == "ANNEXURE_XVIII":
@@ -629,6 +650,7 @@ def main():
     parser.add_argument("--input", "-i", default="DATA(RAW) ", help="Path to raw PDF folder")
     parser.add_argument("--output", "-o", default="DATA", help="Path to output folder")
     parser.add_argument("--from-raw", action="store_true", help="Re-aggregate canonical dataset directly from DATA/raw_extractions.csv")
+    parser.add_argument("--incremental", action="store_true", help="Only process new PDFs that are not already in raw_extractions.csv")
     args = parser.parse_args()
 
     input_dir = args.input
@@ -655,6 +677,20 @@ def main():
         print(f"Loaded {len(raw_extractions):,} raw records from {raw_csv_path}")
     else:
         pdf_files = sorted([f for f in os.listdir(input_dir) if f.lower().endswith(".pdf")])
+        
+        if args.incremental and os.path.exists(raw_csv_path):
+            print(f"Incremental mode: loading existing records from {raw_csv_path}...")
+            df_existing = pd.read_csv(raw_csv_path, dtype=object)
+            for r in df_existing.to_dict("records"):
+                cleaned_r = {k: (None if pd.isna(v) else v) for k, v in r.items()}
+                raw_extractions.append(cleaned_r)
+            existing_pdfs = set(r.get("source_pdf") for r in raw_extractions if r.get("source_pdf"))
+            pdf_files = [f for f in pdf_files if f not in existing_pdfs]
+            print(f"Found {len(existing_pdfs)} already processed PDFs. {len(pdf_files)} new PDFs to process.")
+            
+            if not pdf_files:
+                print("No new PDFs to process. Proceeding to canonical aggregation...")
+        
         print("=" * 90)
         print(f"VIGIL PIPELINE: EXTRACTING INFRASTRUCTURE PROJECT PDFS")
         print(f"Input Directory : {os.path.abspath(input_dir)}")
@@ -685,11 +721,13 @@ def main():
         print("-" * 90)
         print("Post-processing: Writing raw extractions and aggregating canonical dataset...")
 
-        # 1. Assign sequential raw_record_id to every raw record
-        for r_idx, r in enumerate(all_monthly_records, 1):
+        # 1. Append and assign sequential raw_record_id to every raw record
+        for r in all_monthly_records:
             raw_rec = dict(r)
-            raw_rec["raw_record_id"] = r_idx
             raw_extractions.append(raw_rec)
+            
+        for r_idx, r in enumerate(raw_extractions, 1):
+            r["raw_record_id"] = r_idx
 
         # Write raw_extractions.csv
         raw_fields = [
@@ -726,7 +764,7 @@ def main():
         groups[(pid, month)].append(r)
 
     canonical_records = []
-    excluded_canonical_count = 0
+    
     for (pid, month), group in groups.items():
         dup_count = len(group)
         src_pdfs = sorted(list(set(str(g["source_pdf"]) for g in group if g.get("source_pdf"))))
@@ -738,7 +776,6 @@ def main():
         
         # Apply approved identity-audit exclusions (preserves raw_extractions.csv)
         if pid in explicit_excludes or is_excluded_non_project(pid, proj_name):
-            excluded_canonical_count += 1
             continue
         
         sector = next((g["sector"] for g in group if g.get("sector")), "")

@@ -75,8 +75,21 @@ def assemble_model_dataset(
     # Add temporal auditing metadata
     print("Attaching temporal audit metadata...")
     merged["feature_cutoff_month"] = merged["reporting_month"]
-    merged["target_horizon_month_6m"] = merged["reporting_month"].apply(lambda ym: add_months_to_ym(ym, 6))
-    merged["target_horizon_month_12m"] = merged["reporting_month"].apply(lambda ym: add_months_to_ym(ym, 12))
+    def _add_months_vectorized(series, months):
+        s = series.astype(str).str.strip().replace("nan", "")
+        parts = s.str.split("-", expand=True)
+        if parts.shape[1] >= 2:
+            y = pd.to_numeric(parts[0], errors="coerce")
+            m = pd.to_numeric(parts[1], errors="coerce")
+            total_m = y * 12 + (m - 1) + months
+            new_y = total_m // 12
+            new_m = total_m % 12 + 1
+            # format as YYYY-MM
+            return new_y.map(lambda x: f"{int(x):04d}" if pd.notna(x) else "") + "-" + new_m.map(lambda x: f"{int(x):02d}" if pd.notna(x) else "")
+        return pd.Series("", index=series.index)
+
+    merged["target_horizon_month_6m"] = _add_months_vectorized(merged["reporting_month"], 6).replace("-", "")
+    merged["target_horizon_month_12m"] = _add_months_vectorized(merged["reporting_month"], 12).replace("-", "")
 
     # Sort strictly by (project_id, reporting_month)
     merged = merged.sort_values(by=["project_id", "reporting_month"], ascending=[True, True]).reset_index(drop=True)

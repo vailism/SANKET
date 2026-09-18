@@ -143,23 +143,30 @@ def compute_trajectories(
     # -------------------------------------------------------------
     # 4. SCHEDULE TRAJECTORY (Point-in-Time Only)
     # -------------------------------------------------------------
-    sch_dev = pd.to_numeric(df["schedule_deviation"], errors="coerce")
-    df["schedule_deviation_months"] = sch_dev
+    # We will backfill schedule_deviation after calculating dates
+    def _ym_to_month_num_vectorized(series):
+        s = series.astype(str).str.strip().replace("nan", "")
+        parts = s.str.split("-", expand=True)
+        if parts.shape[1] >= 2:
+            y = pd.to_numeric(parts[0], errors="coerce")
+            m = pd.to_numeric(parts[1], errors="coerce")
+            valid_m = (m >= 1) & (m <= 12)
+            res = y * 12 + m
+            return res.where(valid_m, np.nan)
+        return pd.Series(np.nan, index=series.index)
 
+    rev_nums = _ym_to_month_num_vectorized(df.get("revised_completion_date", pd.Series(np.nan, index=df.index)))
+    orig_nums = _ym_to_month_num_vectorized(df.get("original_completion_date", pd.Series(np.nan, index=df.index)))
+    
+    sch_dev = pd.to_numeric(df.get("schedule_deviation", pd.Series(np.nan, index=df.index)), errors="coerce")
+    calculated_dev = rev_nums - orig_nums
+    # If a project is missing explicit schedule deviation but has both dates, infer it.
+    df["schedule_deviation_months"] = sch_dev.fillna(calculated_dev)
+    
     prev_sch_dev = grouped["schedule_deviation_months"].shift(1)
     df["schedule_deviation_change"] = df["schedule_deviation_months"] - prev_sch_dev
 
-    # Target completion date point-in-time: revised if non-null, else original
-    def resolve_target_date(r):
-        rev = str(r.get("revised_completion_date", "") or "").strip()
-        if rev and rev != "nan" and ym_to_month_number(rev) is not None:
-            return ym_to_month_number(rev)
-        orig = str(r.get("original_completion_date", "") or "").strip()
-        if orig and orig != "nan" and ym_to_month_number(orig) is not None:
-            return ym_to_month_number(orig)
-        return np.nan
-
-    df["target_completion_month_num"] = df.apply(resolve_target_date, axis=1)
+    df["target_completion_month_num"] = rev_nums.fillna(orig_nums)
     prev_target_month = grouped["target_completion_month_num"].shift(1)
     df["completion_date_drift"] = df["target_completion_month_num"] - prev_target_month
 

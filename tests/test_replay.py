@@ -23,7 +23,6 @@ import pandas as pd
 
 from sanket.replay import (
     get_project_replay,
-    replay_project,
     replay_project_from_dataframe
 )
 from sanket.inference import load_inference_engine

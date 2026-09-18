@@ -2,43 +2,69 @@
 """
 sanket/api.py
 
-Production FastAPI Service for VIGIL.
+Production FastAPI Service for SANKET.
 Thin REST layer exposing point-in-time inference, historical replay,
-longitudinal timelines, and portfolio governance summaries.
+longitudinal timelines, portfolio governance summaries, and
+Gemini-powered AI intelligence endpoints.
 
 Guarantees:
 - Strictly backed by frozen inference and replay engines
 - Point-in-time integrity preserved across all responses
 - Validated operating thresholds: WATCH=0.40, REVIEW=0.45, ESCALATE=0.50
-- Zero LLM generation: deterministic, TreeSHAP-grounded explanations
+- Risk explanations are deterministic, TreeSHAP-grounded
+- AI intelligence endpoints use Gemini strictly grounded on verified data
 - Strict RFC 8259 JSON output (no NaN tokens)
 """
 
 import os
 import math
+import json
+import logging
+import time
 from typing import Dict, List, Any, Optional
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import dotenv
 from google import genai
 from google.genai import types
 
 dotenv.load_dotenv()
 
-from sanket.inference import load_inference_engine, get_risk_tier
+from sanket.inference import load_inference_engine
 from sanket.replay import get_project_replay
-from sanket.portfolio import get_portfolio, SanitizedPortfolio, format_inr_currency
+from sanket.portfolio import get_portfolio, SanitizedPortfolio
 from sanket import monitoring
+
+logger = logging.getLogger("sanket.api")
 
 # Initialize FastAPI application
 app = FastAPI(
-    title="VIGIL Governance & Early Warning API",
+    title="SANKET Governance & Early Warning API",
     description="Early-warning risk inference and historical replay service for public infrastructure projects.",
     version="1.0.0"
 )
+
+# CORS — allow all origins for frontend proxy compatibility
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    duration_ms = (time.time() - start) * 1000
+    logger.info(f"{request.method} {request.url.path} → {response.status_code} ({duration_ms:.0f}ms)")
+    return response
 
 # Global in-memory cache for fast portfolio querying
 _APP_CONTEXT: Optional[Dict[str, Any]] = None
@@ -67,7 +93,7 @@ def sanitize_for_json(obj: Any) -> Any:
     return obj
 
 
-def get_app_context(dataset_path: str = "DATA/model_dataset.parquet") -> Dict[str, Any]:
+def get_app_context(dataset_path: str = "DATA/datasets/LATEST") -> Dict[str, Any]:
     """
     Lazily load and index the sanitized portfolio on first request.
     Single source of truth consuming the governance-safe portfolio layer.
@@ -91,9 +117,41 @@ def get_app_context(dataset_path: str = "DATA/model_dataset.parquet") -> Dict[st
 def get_lazy_engine(ctx: Dict[str, Any]) -> Dict[str, Any]:
     """Lazily load inference engine and cache it in the app context."""
     if ctx.get("engine") is None:
-        from sanket.inference import load_inference_engine
         ctx["engine"] = load_inference_engine()
     return ctx["engine"]
+
+
+def _get_gemini_client() -> genai.Client:
+    """Return a cached Gemini client, creating one on first call."""
+    global _APP_CONTEXT
+    if _APP_CONTEXT is None:
+        _APP_CONTEXT = {}
+    if "gemini_client" not in _APP_CONTEXT:
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY not set")
+        _APP_CONTEXT["gemini_client"] = genai.Client(api_key=api_key)
+    return _APP_CONTEXT["gemini_client"]
+
+
+# Simple in-memory replay cache to avoid double parquet reads
+_REPLAY_CACHE: Dict[str, Any] = {}
+
+def _get_cached_replay(project_id: str, ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a cached replay result, computing on miss."""
+    if project_id not in _REPLAY_CACHE:
+        _REPLAY_CACHE[project_id] = get_project_replay(
+            project_id, dataset_path=ctx["dataset_path"], engine=get_lazy_engine(ctx)
+        )
+    return _REPLAY_CACHE[project_id]
+
+
+@app.on_event("startup")
+async def startup():
+    """Pre-warm portfolio on startup so the first request is fast."""
+    logger.info("Pre-warming portfolio cache...")
+    get_app_context()
+    logger.info("Portfolio cache ready.")
 
 
 @app.get("/health")
@@ -119,15 +177,20 @@ def list_projects(
     search: Optional[str] = Query(None, description="Search term for project ID or name"),
     sector: Optional[str] = Query(None, description="Filter by sector"),
     risk_tier: Optional[str] = Query(None, description="Filter by risk tier: WATCH, REVIEW, ESCALATE, NORMAL"),
-    limit: int = Query(50, ge=1, le=500, description="Page limit"),
-    offset: int = Query(0, ge=0, description="Page offset")
+    limit: int = Query(50, ge=1, le=5000, description="Page limit"),
+    offset: int = Query(0, ge=0, description="Page offset"),
+    include_historical: bool = Query(False, description="Include all historical/completed projects")
 ) -> Dict[str, Any]:
     """
     Searchable, filterable project portfolio list returning latest state
     for genuine infrastructure projects.
     """
     ctx = get_app_context()
-    df = ctx["portfolio_df"].copy()
+    
+    if include_historical and "genuine_df" in ctx:
+        df = ctx["genuine_df"]
+    else:
+        df = ctx["portfolio_df"]
 
     # Filter by search - if searching specific project ID/name, also check genuine archive if not found in active
     if search:
@@ -135,16 +198,13 @@ def list_projects(
         id_match = df["project_id"].astype(str).str.lower().str.contains(s_term)
         name_match = df["project_name"].astype(str).str.lower().str.contains(s_term)
         matched_df = df[id_match | name_match]
+        
         if len(matched_df) == 0 and "genuine_df" in ctx:
             g_df = ctx["genuine_df"]
             g_id = g_df["project_id"].astype(str).str.lower().str.contains(s_term)
             g_name = g_df["project_name"].astype(str).str.lower().str.contains(s_term)
             matched_df = g_df[g_id | g_name].copy()
-            if "latest_risk" not in matched_df.columns:
-                matched_df["latest_risk"] = 0.0
-                matched_df["latest_risk_tier"] = "NORMAL"
-                matched_df["baseline_cost"] = pd.to_numeric(matched_df.get("C_base", 0), errors="coerce").fillna(0)
-                matched_df["sector_display"] = matched_df.get("sector_clean", "OTHER")
+            
         df = matched_df
 
     # Filter by sector
@@ -157,19 +217,32 @@ def list_projects(
         tier_term = risk_tier.strip().upper()
         df = df[df["latest_risk_tier"] == tier_term]
 
+    # Sort so that the most recent and highest risk projects appear first
+    if "reporting_month" in df.columns and "latest_risk" in df.columns:
+        df = df.sort_values(["reporting_month", "latest_risk"], ascending=[False, False])
+    elif "reporting_month" in df.columns:
+        df = df.sort_values("reporting_month", ascending=False)
+    
     total_count = len(df)
     page_df = df.iloc[offset: offset + limit]
 
+    # Vectorised serialisation — avoids slow iterrows()
+    records = page_df.to_dict(orient="records")
     results = []
-    for _, r in page_df.iterrows():
+    for r in records:
         results.append({
             "project_id": str(r["project_id"]),
             "project_name": str(r.get("project_name", r["project_id"])),
-            "sector": str(r.get("sector_display", "OTHER")),
+            "sector": str(r["sector_display"]) if pd.notna(r.get("sector_display")) else "OTHER",
+            "ministry": str(r["ministry"]) if pd.notna(r.get("ministry")) else "—",
+            "state": str(r["state"]) if pd.notna(r.get("state")) else "—",
             "latest_observation": str(r.get("reporting_month", "")),
-            "latest_risk": float(r.get("latest_risk", 0.0)),
-            "latest_risk_tier": str(r.get("latest_risk_tier", "NORMAL")),
-            "baseline_cost": float(r.get("baseline_cost", 0.0))
+            "latest_risk": float(r.get("latest_risk", 0.0)) if pd.notna(r.get("latest_risk")) else 0.0,
+            "latest_risk_tier": str(r.get("latest_risk_tier", "NORMAL")) if pd.notna(r.get("latest_risk_tier")) else "NORMAL",
+            "baseline_cost": float(r.get("baseline_cost", 0.0)) if pd.notna(r.get("baseline_cost")) else 0.0,
+            "approved_cost": float(r.get("approved_cost", 0.0)) if pd.notna(r.get("approved_cost")) else 0.0,
+            "schedule_deviation_months": float(r["schedule_deviation_months"]) if pd.notna(r.get("schedule_deviation_months")) else None,
+            "financial_progress": float(r.get("financial_progress", 0.0)) if pd.notna(r.get("financial_progress")) else 0.0
         })
 
     return sanitize_for_json({
@@ -258,16 +331,16 @@ def get_project_details(project_id: str) -> Dict[str, Any]:
             "alert": pred["alert"]
         },
         "current_trajectory_metrics": {
-            "C_base": float(rec.get("C_base", 0.0)),
-            "expenditure": float(rec.get("expenditure", 0.0)),
-            "financial_progress": float(rec.get("financial_progress", 0.0)),
-            "schedule_deviation_months": float(rec.get("schedule_deviation_months", 0.0)),
-            "V_fin_1m": float(rec.get("V_fin_1m", 0.0)),
-            "V_fin_3m": float(rec.get("V_fin_3m", 0.0)),
-            "A_fin": float(rec.get("A_fin", 0.0)),
-            "EWMA_V_fin": float(rec.get("EWMA_V_fin", 0.0)),
-            "Z_peer_V_fin": float(rec.get("Z_peer_V_fin", 0.0)),
-            "trajectory_risk_score": float(rec.get("trajectory_risk_score", 0.0))
+            "C_base": float(rec.get("C_base")) if pd.notna(rec.get("C_base")) else 0.0,
+            "expenditure": float(rec.get("expenditure")) if pd.notna(rec.get("expenditure")) else 0.0,
+            "financial_progress": float(rec.get("financial_progress")) if pd.notna(rec.get("financial_progress")) else 0.0,
+            "schedule_deviation_months": float(rec.get("schedule_deviation_months")) if pd.notna(rec.get("schedule_deviation_months")) else None,
+            "V_fin_1m": float(rec.get("V_fin_1m")) if pd.notna(rec.get("V_fin_1m")) else 0.0,
+            "V_fin_3m": float(rec.get("V_fin_3m")) if pd.notna(rec.get("V_fin_3m")) else 0.0,
+            "A_fin": float(rec.get("A_fin")) if pd.notna(rec.get("A_fin")) else 0.0,
+            "EWMA_V_fin": float(rec.get("EWMA_V_fin")) if pd.notna(rec.get("EWMA_V_fin")) else 0.0,
+            "Z_peer_V_fin": float(rec.get("Z_peer_V_fin")) if pd.notna(rec.get("Z_peer_V_fin")) else 0.0,
+            "trajectory_risk_score": float(rec.get("trajectory_risk_score")) if pd.notna(rec.get("trajectory_risk_score")) else 0.0
         },
         "current_risk_tier": pred["risk_tier"],
         "top_explanations": pred["top_explanations"]
@@ -285,7 +358,7 @@ def get_project_historical_replay(project_id: str) -> Dict[str, Any]:
     """
     ctx = get_app_context()
     try:
-        rep = get_project_replay(project_id, dataset_path=ctx["dataset_path"], engine=get_lazy_engine(ctx))
+        rep = _get_cached_replay(project_id, ctx)
     except ValueError:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
 
@@ -299,7 +372,7 @@ def get_project_timeline(project_id: str) -> Dict[str, Any]:
     """
     ctx = get_app_context()
     try:
-        rep = get_project_replay(project_id, dataset_path=ctx["dataset_path"], engine=get_lazy_engine(ctx))
+        rep = _get_cached_replay(project_id, ctx)
     except ValueError:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
 
@@ -642,10 +715,10 @@ def generate_project_brief(payload: ProjectBriefRequest) -> Dict[str, Any]:
             "total_observations": int(rec.get("observation_number", 1)),
             "timeline": [{
                 "reporting_month": str(rec.get("reporting_month", "")),
-                "C_base": float(rec.get("C_base", 0.0)),
-                "expenditure": float(rec.get("expenditure", 0.0)),
-                "financial_progress": float(rec.get("financial_progress", 0.0)),
-                "schedule_deviation_months": float(rec.get("schedule_deviation_months", 0.0)),
+                "C_base": float(rec.get("C_base")) if pd.notna(rec.get("C_base")) else 0.0,
+                "expenditure": float(rec.get("expenditure")) if pd.notna(rec.get("expenditure")) else 0.0,
+                "financial_progress": float(rec.get("financial_progress")) if pd.notna(rec.get("financial_progress")) else 0.0,
+                "schedule_deviation_months": float(rec.get("schedule_deviation_months")) if pd.notna(rec.get("schedule_deviation_months")) else None,
                 "pred_prob": pred["pred_prob"],
                 "raw_prob": pred["raw_prob"],
                 "risk_tier": pred["risk_tier"],
@@ -699,7 +772,7 @@ def generate_project_brief(payload: ProjectBriefRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail="AI interpretation layer is currently unavailable (missing configuration).")
 
     try:
-        client = genai.Client(api_key=api_key)
+        client = _get_gemini_client()
 
         system_instruction = (
             "You are the VIGIL Intelligence Assistant. "
@@ -730,7 +803,6 @@ def generate_project_brief(payload: ProjectBriefRequest) -> Dict[str, Any]:
             )
         )
 
-        import json
         return json.loads(response.text)
 
     except Exception as e:
@@ -742,8 +814,6 @@ class AssistantRequest(BaseModel):
     message: str
     context: Dict[str, Any]
 
-class AssistantKeyRequest(BaseModel):
-    key: str
 
 @app.post("/api/assistant")
 def assistant_chat(payload: AssistantRequest) -> Dict[str, Any]:
@@ -758,11 +828,7 @@ def assistant_chat(payload: AssistantRequest) -> Dict[str, Any]:
         return JSONResponse(status_code=400, content={"error": True, "message": "Message exceeds 2 000 character limit."})
 
     try:
-        from google import genai
-        from google.genai import types
-        import json
-        
-        client = genai.Client(api_key=api_key)
+        client = _get_gemini_client()
         
         system_instruction = (
             "You are the SANKET Analyst Assistant — a concise, data-driven infrastructure-risk analyst embedded in the SANKET command-center dashboard.\n\n"
@@ -791,9 +857,4 @@ def assistant_chat(payload: AssistantRequest) -> Dict[str, Any]:
             return JSONResponse(status_code=429, content={"error": True, "message": "Rate limit reached. Please wait a moment before retrying."})
         return JSONResponse(status_code=500, content={"error": True, "message": "SANKET Analyst encountered an internal error. Please retry."})
 
-@app.post("/api/assistant/key")
-def assistant_set_key(payload: AssistantKeyRequest) -> Dict[str, Any]:
-    if payload.key:
-        os.environ["GEMINI_API_KEY"] = payload.key
-        return {"success": True}
-    return JSONResponse(status_code=400, content={"error": True})
+# NOTE: /api/assistant/key endpoint REMOVED — security vulnerability (unauthenticated API key override)

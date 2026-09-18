@@ -1,892 +1,282 @@
-
 # SANKET
-## Infrastructure Early-Warning & Project Trajectory Intelligence System
 
-> **SANKET monitors where infrastructure projects are heading — not just where they are today.**
+SANKET (System for Analytics and Knowledge on Engineering Trajectories) is an AI-powered early-warning system for large public infrastructure projects. It continuously ingests monthly administrative reports and uses machine learning to predict upcoming cost and schedule overruns, moving oversight from reactive state-monitoring to predictive trajectory-monitoring.
 
-SANKET is an AI-powered early-warning system for large infrastructure projects. It analyzes historical project progress, expenditure, schedule behavior, and trajectory changes to identify projects that are **drifting toward cost or schedule overruns before conventional monitoring systems would flag them**.
+## The Problem
 
-The system is designed around a simple distinction:
+Traditionally, infrastructure governance relies on monitoring the *current state* of a project. However, by the time a project officially reports a "cost overrun" or a major "schedule delay," the technical or financial failure has already occurred on the ground months prior. Reporting is fundamentally lagged by administrative approvals. Monitoring current state alone provides reporting, not early warning.
 
-**Traditional monitoring:**  
-> What is the current status of the project?
+## The Core Idea
 
-**SANKET:**  
-> Is the project's trajectory getting worse, and what is likely to happen next?
+"Monitor the direction, not just the state."
 
----
+SANKET tracks the longitudinal trajectory of projects over time. By calculating the first and second derivatives (velocity and acceleration) of financial expenditure, physical progress, and schedule drift, SANKET detects deteriorating project momentum and predicts distress 3 to 11 months before it is officially recorded as an overrun.
 
-# 1. Problem
+## How SANKET Works
 
-Large infrastructure projects are monitored using periodic reports containing information such as:
-- Physical progress
-- Financial progress
-- Expenditure
-- Approved project cost
-- Revised project cost
-- Completion schedules
-- Milestones
-- Project status
+SANKET processes data through a strict chronological pipeline:
 
-However, a project may still appear acceptable when its underlying trajectory has already started deteriorating.
+`Project Data` → `Canonicalization` → `Timeline Construction` → `Trajectory Features` → `Risk Prediction` → `Risk Tier` → `Governance/Recovery` → `Authority Escalation`
 
-For example:
+*Note: SANKET provides early-warning predictive alerts to optimize audit and review prioritization. The ML model does not automatically issue legal/regulatory penalties or determine contractor liability.*
 
-```text
-Month       Progress       Interpretation
-January       42%          Normal
-February      44%          Normal
-March         45%          Slight slowdown
-April         46%          Significant slowdown
-May           46.5%        Persistent deterioration
-June          47%          High-risk trajectory
+## System Architecture
+
+```mermaid
+graph TD
+    A[PDF Flash Reports] --> B(Extraction Engine)
+    B --> C(Content-Addressed Manifest)
+    C --> D[(Canonical CSV Datasets)]
+    D --> E(Timeline Builder)
+    E --> F(Trajectory & Target Generator)
+    F --> G(Feature Store - Parquet)
+    G --> H[Frozen LightGBM Model]
+    H --> I[(SQLite / PostgreSQL)]
+    I --> J[FastAPI Backend]
+    J --> K[Vanilla JS Frontend]
+    J -.-> L[Gemini AI Explanations]
 ```
 
-A conventional status-based system may only identify the problem once the project is already delayed.
-
-SANKET attempts to detect the deterioration before the failure becomes obvious.
-
----
-
-# 2. Core Idea
-
-SANKET follows two complementary approaches:
-
-### Trajectory Intelligence
-Detect changes in how a project is progressing.
-
-```text
-Progress
-   ↓
-Velocity
-   ↓
-Acceleration
-   ↓
-EWMA / CUSUM
-   ↓
-Peer deviation
-   ↓
-Trajectory risk
-```
-
-### Predictive Intelligence
-Use historical project behavior to estimate the probability of a future overrun.
-
-```text
-Historical project data
-        ↓
-Temporal features
-        ↓
-LightGBM
-        ↓
-6-month overrun probability
-```
-
-The final system combines these signals into an actionable early-warning system.
-
----
-
-# 3. System Architecture
-
-```text
-                PAIMANA / OCMS REPORTS
-                         │
-                         ▼
-                ┌─────────────────┐
-                │ PDF INGESTION   │
-                │ & EXTRACTION    │
-                └────────┬────────┘
-                         │
-                         ▼
-                ┌─────────────────┐
-                │ NORMALIZATION   │
-                │ & VALIDATION    │
-                └────────┬────────┘
-                         │
-                         ▼
-              PROJECT × MONTH DATASET
-                         │
-                 ┌───────┴────────┐
-                 ▼                ▼
-        ┌────────────────┐ ┌────────────────┐
-        │  TRAJECTORY    │ │  PREDICTIVE    │
-        │    ENGINE      │ │    ENGINE      │
-        │                │ │                │
-        │ Velocity       │ │ LightGBM       │
-        │ Acceleration   │ │ 6/12 month     │
-        │ EWMA           │ │ prediction     │
-        │ CUSUM          │ │                │
-        │ Peer deviation │ │                │
-        └───────┬────────┘ └───────┬────────┘
-                │                  │
-                └────────┬─────────┘
-                         ▼
-                ┌─────────────────┐
-                │ EARLY WARNING   │
-                │ ENGINE          │
-                └────────┬────────┘
-                         │
-                         ▼
-                ┌─────────────────┐
-                │ SANKET DASHBOARD │
-                │                 │
-                │ National View   │
-                │ Project Console │
-                │ Why?            │
-                │ Replay          │
-                │ What-if         │
-                └─────────────────┘
-```
-
----
-
-# 4. Current Development Stage
-
-The project is currently in the **Data Ingestion & Normalization** stage.
-
-The first 40 reports were processed successfully to validate the extraction architecture before scaling to the complete report collection.
-
-### Current pilot results
-
-```text
-PDFs processed                         40
-PDFs successful                        40
-PDFs failed                             0
-Raw extracted records              55,300
-Canonical project-month records   39,017
-Unique projects                     5,705
-Physical progress coverage           48.5%
-Financial progress coverage          94.5%
-Duplicate project-month pairs            0
-```
-
-The final dataset will be regenerated after the remaining reports are processed.
-
-*These numbers are pilot-stage metrics and are not final SANKET dataset statistics.*
-
----
-
-# 5. Data Model
-
-The canonical dataset follows a strict rule:
-
-**ONE ROW = ONE UNIQUE PROJECT + ONE REPORTING MONTH**
-
-Example:
-
-| project_id | reporting_month | physical_progress |
-| :--- | :--- | :--- |
-| P001 | 2023-01 | 41.2 |
-| P001 | 2023-02 | 44.0 |
-| P001 | 2023-03 | 45.1 |
-| P001 | 2023-04 | 45.8 |
-
-This temporal structure is essential for SANKET.
-
-The system must never treat multiple extracted table rows representing the same project/month as separate observations.
-
----
-
-# 6. Data Pipeline
-
-```text
-PDF reports
-    │
-    ▼
-PDF extraction
-    │
-    ▼
-Raw extraction records
-    │
-    ▼
-Field normalization
-    │
-    ▼
-Project identity normalization
-    │
-    ▼
-Project × reporting month deduplication
-    │
-    ▼
-Canonical monthly dataset
-    │
-    ▼
-Validation
-    │
-    ▼
-Trajectory Engine
-```
-
----
-
-# 7. Repository Structure
-
-```text
-SANKET/
-│
-├── DATA/
-│   ├── raw_extractions.csv
-│   ├── project_monthly.csv
-│   ├── project_coverage.csv
-│   └── projects.csv
-│
-├── DATA(RAW)/
-│   └── *.pdf
-│
-├── scripts/
-│   ├── extract_pdfs.py
-│   ├── normalize.py
-│   ├── validate.py
-│   └── audit_identity.py
-│
-├── .venv/
-│
-├── requirements.txt
-│
-└── README.md
-```
-
----
-
-# 8. Important Dataset Files
-
-### `raw_extractions.csv`
-Contains the raw records extracted from the PDFs.
-
-Raw provenance is preserved through fields such as:
-- `raw_record_id`
-- `source_pdf`
-- `source_page`
-- `raw_text`
-
-This file should be treated as the audit layer. Raw data should not be destroyed when cleaning the canonical dataset.
-
----
-
-### `project_monthly.csv`
-The primary dataset used by SANKET.
-
-Each row represents:
-**ONE PROJECT × ONE REPORTING MONTH**
-
-Typical fields include:
-- `project_id`
-- `project_name`
-- `reporting_month`
-- `sector`
-- `ministry`
-- `state`
-- `physical_progress`
-- `financial_progress`
-- `expenditure`
-- `approved_cost`
-- `revised_cost`
-- `schedule_deviation`
-- `source_pdf`
-- `source_pages`
-
-Additional provenance and extraction-quality fields may also be present.
+## Data Pipeline
 
----
+The data pipeline strictly separates extraction from downstream temporal engineering:
 
-### `project_coverage.csv`
-Provides longitudinal coverage for each project.
+1. **NEW PDF**: Raw project monitoring reports.
+2. **MANIFEST**: Content-addressed idempotent tracking of parsed files.
+3. **EXTRACTION**: Optical extraction of tables to raw observations.
+4. **CANONICAL**: Deduplication and rule-based cleaning.
+5. **TIMELINE**: Assembling longitudinal monthly timeseries per project.
+6. **TRAJECTORY**: Computing rolling velocities and accelerations.
+7. **TARGET**: Point-in-time calculation of forward-looking distress.
+8. **FEATURES**: Constructing the final ML inference matrix.
+9. **PORTFOLIO**: Batch updating the current active risk predictions.
 
-Example:
-- `project_id`
-- `project_name`
-- `first_observation`
-- `last_observation`
-- `observation_count`
-- `missing_month_count`
+### Incremental Storage/I/O
+The pipeline is **fully incremental** in both mathematical compute and I/O. Using `ingestion_manifest.json`, SANKET detects exactly which PDFs changed, isolates the affected `(project, month)` pairs, and propagates the minimal required changes through the pipeline. Large datasets (e.g., `project_monthly.csv` and timeline partitions) are updated chunk-by-chunk and partition-by-partition, keeping peak memory strictly under 512MB for horizontal scalability on micro-instances.
 
-This file is used to determine whether projects contain sufficient historical data for trajectory analysis.
+## Dataset
 
----
+*(Verified current baseline)*
 
-### `projects.csv`
-Project-level master data. One row represents one unique project.
+- **354** tracked PDF reports
+- **1,118,502** raw extraction records
+- **478,356** canonical project-month records
+- **125,124** archive entities
+- **Date Range**: 2001-10 → 2026-07
 
----
+*Note: Archive entities include historical variations and minor name changes. The active modeling dataset comprises 9,907 eligible genuine unique projects.*
 
-### `extraction_quality.csv`
-Records extraction quality for each source PDF.
+## Project Identity / Data Quality
 
-Useful fields include:
-- `source_pdf`
-- `pages`
-- `projects_detected`
-- `reporting_month_detected`
-- `ocr_used`
-- `extraction_status`
+Raw records undergo extensive sanitation:
+- Project identities are canonicalized based on similarity heuristics and PAIMANA official identifiers where available.
+- Conflicting duplicate observations for the same `(project_id, reporting_month)` are reconciled via max-conservative merging.
+- Synthetic/front-matter artifacts (e.g., table of contents misidentified as projects) are filtered.
+- Right-censored observations (where the future is unknown) are strictly marked as `NaN` and dropped from training, never assumed to be zero.
 
----
+## Machine Learning
 
-### `extraction_errors.csv`
-Contains PDFs/pages where extraction encountered problems. The pipeline is designed to continue processing other reports even when an individual document fails.
+The production model is a **LightGBM Classifier** with **Isotonic Calibration**.
+It operates as a **frozen production artifact** (`vigil_production_model.joblib`) and is not automatically retrained during standard monthly incremental ingestion. 
 
----
+## Production Features
 
-### `project_identity_review.csv`
-Contains automated project-identity audit results. It is used to identify:
-- Table headings
-- Report headings
-- Column-header artifacts
-- Ministry/sector labels
-- Other non-project entities
+Features are engineered strictly from data available at or before the prediction month $t$.
 
-These records are reviewed before entering the canonical dataset.
+### Financial trajectory
+- `V_fin_1m`, `V_fin_3m`, `A_fin`, `EWMA_V_fin`
 
----
+### Expenditure trajectory
+- `V_exp_1m`, `V_exp_3m`, `A_exp`
 
-# 9. Data Integrity Rules
+### Cost/schedule
+- `cost_revision_ratio`, `expenditure_to_baseline`, `schedule_deviation_months`, `schedule_deviation_change`, `completion_date_drift`
 
-The following rules are mandatory:
+### Peer/context
+- `Z_peer_V_fin`, `sector_clean`, `scale_bucket`
 
-### Rule 1 — Canonical grain
-`(project_id, reporting_month)` must be unique.
+### Trajectory & Physical
+- `trajectory_risk_score`, `V_phys_1m`, `V_phys_3m`, `A_phys`, `financial_physical_gap`
 
-Validation:
-```python
-assert not project_monthly.duplicated(
-    ["project_id", "reporting_month"]
-).any()
-```
+### Temporal/history
+- `project_age_months`, `observation_number`, `months_since_previous_observation`, `reporting_gap_flag`
 
----
+### Baseline
+- `C_base`
 
-### Rule 2 — No fabricated values
-If a value cannot be reliably extracted:
-`NULL` is preferred over guessing.
+## Target Definition
 
----
+SANKET predicts a 12-month forward horizon.
 
-### Rule 3 — Preserve raw provenance
-Every canonical observation should be traceable back to its source PDF/page wherever possible.
+**Primary target:** `overrun_composite_12m`
+This is a logical `OR` between:
+1. `cost_overrun_12m`: A >=5% increase in the revised cost baseline within 12 months.
+2. `schedule_overrun_12m`: A >=6.0 month forward drift in the anticipated completion date or official schedule deviation within 12 months.
 
----
+Incomplete future windows (right censoring) are excluded, not imputed as negative.
 
-### Rule 4 — Do not delete raw data
-Cleaning and deduplication happen in the canonical layer. The raw extraction layer remains available for auditing.
+## Leakage Prevention
 
----
+SANKET strictly adheres to point-in-time constraints:
+- Evaluated via strict chronological walk-forward validation with a 12-month forward horizon safety buffer (max(train) < min(test)).
+- Replay engines simulate historical environments without future knowledge.
+- Peer statistics (`Z_peer_V_fin`) are computed purely on trailing cohorts.
 
-# 10. Trajectory Engine
+## Model Validation
 
-Once the data ingestion stage is frozen, SANKET will calculate temporal features.
+*Verified Out-of-Fold (OOF) Metrics (N = 56,514 test observations across 9,907 projects):*
 
-### Progress Velocity
-$$V(t) = P(t) - P(t-1)$$
-This measures how quickly project progress is changing.
+- **Global OOF PR-AUC:** 0.6467
+- **Global OOF ROC-AUC:** 0.7639
+- **Global OOF Brier Score:** 0.1926 (Isotonic Calibrated: 0.1824)
 
----
+*Note: Validation metrics represent historical evaluation and are not guarantees of future performance.*
 
-### Progress Acceleration
-$$A(t) = V(t) - V(t-1)$$
-This identifies whether progress itself is speeding up or slowing down.
+## Alert Thresholds
 
----
+The calibrated model probabilities map to specific operational governance tiers:
 
-### EWMA
-Exponentially Weighted Moving Average will be used to reduce sensitivity to isolated noisy observations while retaining persistent changes:
-$$Z(t) = \lambda X(t) + (1-\lambda)Z(t-1)$$
+- **NORMAL:** < 0.40
+- **WATCH:** >= 0.40 (Broad Surveillance)
+- **REVIEW:** >= 0.45 (Prioritized PMU Scrutiny)
+- **ESCALATE:** >= 0.50 (High-confidence Minister/Authority Review)
 
----
+*These are risk identification tiers. Business logic—not the ML model—governs statutory transitions or official project recovery tracking.*
 
-### CUSUM
-CUSUM may be used to detect sustained deviations from a project’s normal behavior.
+## Trajectory vs Current-State Monitoring
 
----
+At a matched operational alert burden (identifying ~8% of the portfolio for audit), the trajectory features provide a median of **4.0 months of early warning** compared to **2.0 months** for current-state static heuristics, while maintaining a false-alert rate of 2.38% (at threshold=0.50).
 
-### Peer Deviation
-Projects should not be judged using universal thresholds. A large railway project and a small water project may naturally have very different progress patterns.
+## Replay Engine
 
-SANKET therefore compares projects against appropriate peers based on available attributes such as:
-- sector
-- ministry
-- project size
-- duration
-- project stage
+SANKET includes a Point-in-Time replay engine that allows auditors to "time travel" to any historical month, feed the exact information available at that time into the model, and simulate the generated risk alerts alongside the actual real-world outcome, providing transparent validation of the model's predictive lead time.
 
----
+## Data Dependency Propagation
 
-# 11. Predictive Engine
+Because some features (e.g. `Z_peer_V_fin`) are normalized against peer cohorts sharing the same `(reporting_month, sector_clean, scale_bucket)`, SANKET's incremental pipeline correctly identifies when an edit to a single project cascades to alter the normalization denominators of its peers, gracefully backfilling affected peer trajectories.
 
-The predictive model will use **LightGBM**.
+## Operational Governance
 
-The model will not simply predict whether a project is currently delayed.
+Projects flagged by the SANKET engine enter an operational state machine tracked in the database:
+`NORMAL` → `WATCH` → `CONTRACTOR_WARNING` → `RESPONSE_SUBMITTED` → `UNDER_RECOVERY` → `RECOVERED`
 
-Instead:
-> **At month $t$:** Predict whether an overrun will occur within the next 6 months.
+Or, upon persistent deterioration:
+`UNDER_RECOVERY` → `PERSISTENT_DETERIORATION` → `AUTHORITY_ESCALATION`
 
-Formally:
-$$Y(t+6) = 1$$
-if the project experiences an overrun during the following six months.
+## AI Explanation Layer
 
-An optional 12-month prediction horizon may also be implemented.
+SANKET integrates the **Gemini 1.5 Flash** API (`@google/genai` SDK) to translate complex TreeSHAP feature importances and raw trajectory data into natural language project briefs and conversational Q&A. The AI serves strictly as an explanatory assistant and is **read-only**—it does not alter the risk probability, issue alerts, or modify project states.
 
----
+## API
 
-# 12. Candidate Features
+The backend is built on **FastAPI** (`uvicorn`). Key endpoints:
 
-The initial feature set is intentionally small and interpretable:
-- `project_size`
-- `sector`
-- `ministry`
-- `project_age`
-- `physical_progress`
-- `financial_progress`
-- `expenditure_ratio`
-- `progress_velocity_1m`
-- `progress_velocity_3m`
-- `progress_acceleration`
-- `cost_growth_3m`
-- `schedule_deviation`
-- `peer_progress_deviation`
-- `reporting_gap`
-- `milestone_slippage`
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/health` | Service status |
+| GET | `/api/projects` | List all tracked projects |
+| GET | `/api/projects/{id}` | Fetch project details and latest predictions |
+| GET | `/api/projects/{id}/timeline` | Fetch full longitudinal history |
+| GET | `/api/projects/{id}/replay` | Simulate historical point-in-time predictions |
+| GET | `/api/dashboard/summary` | Aggregate portfolio risk stats |
+| POST| `/api/monitor/projects` | Register a project for active governance |
+| POST| `/api/ai/project-brief` | Generate a Gemini-powered summary report |
+| POST| `/api/assistant` | Conversational query over project state |
 
-Additional features should only be added when justified by the available data.
+## Database
 
----
+SANKET supports dual database modes via connection pooling:
+- **SQLite (WAL mode):** Default zero-config storage for local development (`DATA/monitoring.db`).
+- **PostgreSQL:** Production deployment using `psycopg2` when `DATABASE_URL` is provided.
 
-# 13. Preventing Data Leakage
+## Frontend
 
-SANKET must be evaluated as if it were operating in real time:
+The frontend is a lightweight **Vanilla JS** application (`HTML`, `CSS`, and `JS`) utilizing Tailwind-style utilities. It requires no Node.js build step for core execution. It includes interactive charts, a replay UI, governance intervention tracking, and AI explanation panels.
 
-```text
-March 2023
-    ↓
-SANKET prediction
-    ↓
-April → September 2023
-    ↓
-Did an overrun occur?
-```
+## Deployment
 
-The March prediction must never use information from April onward.
-
-The model must also not use final revised costs or completion dates when those values would not have been known at prediction time.
-
----
-
-# 14. Backtesting
-
-SANKET will use **walk-forward validation**:
-
-```text
-Train:       historical data
-Test:        next time period
-                     ↓
-Move forward
-                     ↓
-Train:       expanded historical data
-Test:        next time period
-                     ↓
-Repeat
-```
-
-This better represents how the system would behave in production.
-
----
-
-# 15. Evaluation
-
-Accuracy alone is not the primary metric.
-
-The main metric is:
-
-### Early-Warning Lead Time
-$$\text{Lead Time} = \text{Actual Overrun Date} - \text{SANKET Alert Date}$$
-
-For historical projects that eventually overran, SANKET will calculate how early it could have identified the deteriorating trajectory.
-
-The primary headline metric will be:
-$$\textbf{Median Early-Warning Lead Time}$$
-
-Supporting metrics may include:
-- Precision
-- Recall
-- PR-AUC
-- False-alert rate
-- Calibration
-- Detection rate
-
-*No performance number should be presented until it has been produced by leakage-free backtesting.*
-
----
-
-# 16. Dashboard
-
-The final dashboard will contain two primary views:
-
-### National View
-```text
-SANKET
-Infrastructure Early Warning System
-Projects                 XXXX
-High Risk                  XX
-Value at Risk           ₹XXX Cr
-Median Warning           X months
-INTERVENTION QUEUE
-Project A     91     ↓↓↓     5 months
-Project B     87     ↓↓      8 months
-Project C     82     ↓       3 months
-```
-
----
-
-### Project Console
-```text
-PROJECT A
-Risk                  91%
-Physical Progress     47%
-Financial Progress    51%
-Schedule Deviation    +4.2 months
-TRAJECTORY
-       Progress
-          │
-          │        Expected
-          │       /
-          │     /
-          │   _/
-          │ _/
-          └──────────────── Time
-WHY?
-1. Progress velocity declining
-2. Schedule deviation increasing
-3. Performance below peer baseline
-```
-
----
-
-# 17. Historical Replay
-
-The historical replay is one of the core demonstration features.
-
-A completed project can be replayed month by month:
-
-```text
-JAN     18%
-FEB     21%
-MAR     24%
-APR     29%
-MAY     34%
-JUN     43%    ⚠
-JUL     56%    🔴
-AUG     71%
-SEP     78%
-        ACTUAL OVERRUN
-```
-
-The system then shows the point at which SANKET would have raised an alert.
-
-The final statement should be based entirely on actual backtesting:
-> *"SANKET would have detected the deteriorating trajectory X months before the recorded overrun."*
-
----
-
-# 18. Scenario Analysis
-
-A lightweight scenario feature may allow users to modify selected inputs and observe the resulting model sensitivity.
-
-Example:
-```text
-Schedule deviation
--3 months ───────●────── +6 months
-Risk:
-64% → 81%
-```
-
-This should be described as a **Model Sensitivity Estimate** and not as a causal prediction.
-
----
-
-# 19. Intervention Prioritization
-
-High risk alone is not enough.
-
-SANKET can prioritize projects using:
-$$\text{Priority} = \text{Risk} \times \text{Exposure}$$
-
-This allows administrators to focus attention on projects where deterioration is both:
-- highly probable
-- potentially financially significant
-
-The output is an intervention queue rather than an optimization system.
-
----
-
-# 20. Technology Stack
-
-- **Data & ML:** Python, Pandas, NumPy, scikit-learn, LightGBM
-- **PDF Processing:** PyMuPDF, pdfplumber, Camelot / table extraction tools
-- **Backend:** FastAPI
-- **Database:** PostgreSQL
-- **Frontend:** React, TypeScript, Tailwind CSS, Recharts / Plotly
-- **Deployment:** Docker
-
----
-
-# 21. Development Roadmap
-
-```text
-PHASE 1 — DATA INGESTION
-        │
-        ├── PDF extraction
-        ├── normalization
-        ├── project identity
-        ├── deduplication
-        └── validation
-                 │
-                 ▼
-PHASE 2 — TRAJECTORY ENGINE
-        │
-        ├── timeline builder
-        ├── velocity
-        ├── acceleration
-        ├── EWMA
-        ├── CUSUM
-        └── peer deviation
-                 │
-                 ▼
-PHASE 3 — PREDICTIVE ENGINE
-        │
-        ├── target generation
-        ├── LightGBM
-        ├── feature engineering
-        └── probability calibration
-                 │
-                 ▼
-PHASE 4 — BACKTESTING
-        │
-        ├── walk-forward validation
-        ├── lead-time calculation
-        ├── precision / recall
-        └── PR-AUC
-                 │
-                 ▼
-PHASE 5 — PRODUCT
-        │
-        ├── FastAPI
-        ├── national dashboard
-        ├── project console
-        ├── historical replay
-        └── intervention queue
-                 │
-                 ▼
-PHASE 6 — POLISH
-        │
-        ├── scenario sensitivity
-        └── optional LLM assistant
-```
-
----
-
-# 22. Current Priority
-
-The immediate priority is not ML.
-
-The remaining source reports must first be processed through the validated ingestion pipeline.
-
-After the complete dataset is available:
-
-```text
-PDF collection
-      ↓
-Canonical project_monthly.csv
-      ↓
-DATA QUALITY FREEZE
-      ↓
-TIMELINE ENGINE
-```
-
-Only after the temporal dataset has been verified should model development begin.
-
----
-
-# 23. Design Principles
-
-- **Monitor the direction, not the state:** A project that is deteriorating slowly may be more important than a project that is already delayed but stable.
-- **Never use future information:** Predictions must represent what could genuinely have been known at that time.
-- **Prefer interpretable signals:** Velocity, acceleration, peer deviation, and schedule behavior should remain understandable to administrators.
-- **Never fabricate performance:** All model metrics must come from actual backtesting.
-- **Preserve provenance:** Every important prediction should ultimately be traceable to the underlying project observations.
-- **Keep the system focused:** SANKET is an early-warning system, not a generic AI chatbot.
-
----
-
-# 24. Final Vision
-
-SANKET transforms infrastructure monitoring from:
-> *"What went wrong?"*
-
-to:
-> *"Where are we heading?"*
-
-The objective is not simply to identify failed projects. The objective is to identify the trajectory toward failure early enough for intervention to still matter.
-
----
-
-### Status
-- **Current:** Data ingestion and validation
-- **Next:** Trajectory Intelligence Engine
-- **Target:** Leakage-free infrastructure early-warning system with measurable early-warning lead time.
-
----
-
-### Project
-**SANKET** — Infrastructure Early-Warning & Project Trajectory Intelligence System  
-*Built for intelligent, proactive infrastructure project monitoring.*
-
----
-
-## License
-
-This project is licensed under the [MIT License](LICENSE).
----
-
-# 25. SANKET — Infrastructure Risk Admin Dashboard
-
-A production-quality command-center dashboard for government infrastructure risk monitoring and intelligence. Built with vanilla HTML, CSS, and JavaScript.
-
-![Status](https://img.shields.io/badge/status-operational-10b981)
-![Security](https://img.shields.io/badge/security-TLS%201.3-06b6d4)
-![Clearance](https://img.shields.io/badge/clearance-TIER--1-ef4444)
-
-## Features
-
-- **Portfolio Vital Metrics** — Total monitored projects, high-risk excursions, value-at-risk, warning lead times
-- **Ongoing Projects** — Filterable, scored project cards with severity indicators
-- **Trajectory Divergence Model** — SVG line chart with anomaly markers, discrepancy annotations, and deviation envelopes
-- **Execution Disparity** — Radial score, physical vs. financial progress spread, quarterly bar chart
-- **Sensor Array Status** — Live sensor meters (RTK, InSAR, LiDAR, Strain)
-- **AI Analyst Assistant** — Chat panel powered by Google Gemini for data-driven risk analysis
-- **Responsive Design** — Desktop-first with tablet and mobile breakpoints
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| Frontend | HTML5, CSS3, Vanilla JavaScript |
-| Typography | Inter + JetBrains Mono (Google Fonts) |
-| Charts | Custom SVG rendering |
-| Backend | Node.js + Express |
-| AI | Google Gemini API (`@google/generative-ai`) |
-
-## Quick Start
-
-### Prerequisites
-
-- **Node.js** ≥ 18
-- A [Google Gemini API key](https://aistudio.google.com/app/apikey) (optional — dashboard works without it)
-
-### Installation
-
-```bash
-# Clone and install
-cd frontend
-npm install
-
-# Configure environment (optional, for AI assistant)
-cp .env.example .env
-# Edit .env and add your Gemini API key
-```
-
-### Running
-
-```bash
-npm start
-# → Server runs at http://localhost:3001
-```
-
-Open [http://localhost:3001](http://localhost:3001) in your browser.
+SANKET is fully configured for deployment on **Render** (via `render.yaml`).
+- **Build:** `pip install -r requirements.txt`
+- **Start:** `uvicorn sanket.api:app --host 0.0.0.0 --port $PORT`
+- **Port:** Managed via `$PORT` environment variable.
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `GEMINI_API_KEY` | No | Google Gemini API key for the AI assistant |
-| `PORT` | No | Server port (default: `3001`) |
+Create a `.env` file in the root directory:
 
-> **Security**: The API key is read server-side only. It is never exposed to the frontend. The `.env` file is git-ignored.
-
-## Project Structure
-
-```
-frontend/
-├── server.js              # Express server + Gemini API route
-├── package.json
-├── .env.example           # Environment template
-├── .gitignore
-├── README.md
-└── public/
-    ├── index.html         # Main dashboard HTML
-    ├── css/
-    │   └── styles.css     # Complete stylesheet (tokens, layout, components)
-    └── js/
-        ├── data.js        # Mock dashboard data
-        ├── charts.js      # SVG sparkline + trajectory chart renderer
-        ├── assistant.js   # AI assistant (panel, API, persistence)
-        └── app.js         # Main controller (init, events, interactions)
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+DATABASE_URL=postgresql://user:pass@host/dbname  # Optional: defaults to local SQLite if omitted
+SANKET_STORAGE_MODE=local
 ```
 
-## Gemini AI Assistant
+## Local Development
 
-The AI assistant is accessible via the floating cyan button in the lower-right corner. It connects to the Gemini API through `POST /api/assistant`.
+```bash
+# 1. Clone & environment setup
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-### How it works
+# 2. Run the Incremental Pipeline
+python3 run_incremental_pipeline.py
 
-1. Frontend sends the user message + a dashboard context snapshot
-2. Express server forwards to Gemini with a system prompt instructing it to be a concise infrastructure-risk analyst
-3. Response is displayed in the chat panel with citation formatting
+# 3. Start the API server
+uvicorn sanket.api:app --reload
 
-### Configuration
-
-1. Get an API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
-2. Copy `.env.example` to `.env`
-3. Replace `your_gemini_api_key_here` with your actual key
-4. Restart the server
-
-### Without a key
-
-The dashboard is fully functional without an API key. The AI assistant will show a friendly offline message.
-
-## API Reference
-
-### `POST /api/assistant`
-
-**Request body:**
-```json
-{
-  "message": "Why is NH-44 flagged critical?",
-  "context": { /* dashboard snapshot */ }
-}
+# 4. Access the Frontend
+open frontend/public/index.html
 ```
 
-**Success response (200):**
-```json
-{
-  "reply": "NH-44 Package 3B is flagged critical with a score of 92/100 due to..."
-}
+## Testing
+
+Run the test suite (106 tests covering model leakage, idempotency, incremental parity, API, and target definitions):
+
+```bash
+python3 -m pytest tests/
 ```
 
-**Error responses:**
-- `400` — Missing or invalid message
-- `429` — Rate limit exceeded
-- `500` — Gemini API error
-- `503` — API key not configured
+## Security
 
-## Responsive Breakpoints
+- CORS is strictly configured in FastAPI.
+- Secret keys (e.g. `GEMINI_API_KEY`) are required via environment variables.
+- SQL operations utilize parameterized queries (`psycopg2` placeholders and SQLite `?` bindings) to prevent SQL injection.
+- (Limitation) SANKET currently does not implement user authentication/authorization; it is designed to run in a protected VPC/intranet environment.
 
-| Breakpoint | Layout |
-|------------|--------|
-| > 1280px | Full 3-column grid |
-| 1024–1280px | Compact 3-column |
-| 768–1024px | 2-column + stacked detail |
-| < 768px | Single column |
+## Limitations
 
-## License
+- **Physical Progress Sparsity:** Physical progress tracking is sparse (available in <5% of historical data). 
+- **Non-Causal Predictions:** Features like past cost revisions are predictive of future revisions, but do not imply causality.
+- **No Automatic Retraining:** The ML model is frozen. Any concept drift in macroeconomic conditions requires a manual retraining cycle.
+- **Resource Constraints:** No standalone authorization layer; assumes internal deployment.
 
-This project is provided for demonstration purposes.
+## Future Work
 
+- Expanding data integrations to include satellite imagery and geospatial analysis for ground-truth physical progress validation.
+- Implementing automated ML monitoring (drift detection) to trigger model retraining.
+- Extending statutory transitions and SLA countdowns in the governance state machine.
+
+## Repository Structure
+
+```text
+.
+├── DATA/                   # Local databases and dataset files
+├── DATA(RAW)/              # Raw input PDFs
+├── configs/                # Configuration files (model.yaml)
+├── docs/                   # Documentation and audit logs
+├── frontend/               # Vanilla JS dashboard
+├── sanket/                 # Core Python package
+│   ├── api.py              # FastAPI application
+│   ├── db.py               # SQLite/PostgreSQL connection pool
+│   ├── model.py            # Frozen LightGBM wrapper
+│   └── *_incremental.py    # Chunked, partition-based pipeline
+├── scripts/                # Utility and extraction scripts
+├── tests/                  # Pytest suite
+├── run_incremental_pipeline.py
+├── render.yaml             # Render deployment config
+└── requirements.txt
+```
+
+## Research / Engineering Position
+
+SANKET demonstrates that shifting from static current-state monitoring to longitudinal trajectory-aware modeling significantly increases the early-warning lead time for infrastructure distress. By successfully implementing a strictly point-in-time, chunked incremental pipeline, SANKET provides an operationally viable predictive governance tool capable of running on minimal hardware resources.

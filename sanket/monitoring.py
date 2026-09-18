@@ -39,8 +39,6 @@ from sanket.trajectory import (
 DEFAULT_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "DATA", "monitoring.db")
 
 # Operating thresholds (frozen)
-THRESHOLD_WATCH = 0.40
-THRESHOLD_REVIEW = 0.45
 THRESHOLD_ESCALATE = 0.50
 
 # Governance persistence policy (default: 2 consecutive cycles >= 0.50 post-warning)
@@ -794,7 +792,6 @@ def submit_observation(
                 calibrated_prob=pred_res["calibrated_prob"],
                 risk_tier=pred_res["risk_tier"],
                 curr_features=curr_features,
-                prior_observations=prior_obs,
                 top_explanations=pred_res["top_explanations"],
                 persistence_cycles=persistence_cycles
             )
@@ -830,7 +827,6 @@ def evaluate_governance_workflow(
     calibrated_prob: float,
     risk_tier: str,
     curr_features: pd.Series,
-    prior_observations: List[Dict[str, Any]],
     top_explanations: List[Dict[str, Any]],
     persistence_cycles: int = DEFAULT_PERSISTENCE_CYCLES
 ) -> Dict[str, Any]:

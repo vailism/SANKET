@@ -34,7 +34,6 @@ def run_audit(input_csv="DATA/project_monthly.csv", output_csv="DATA/project_ide
         return
 
     df = pd.read_csv(input_csv, dtype=str)
-    total_canonical_rows = len(df)
     total_unique_projects = df["project_id"].nunique()
 
     # Define rule patterns

@@ -100,8 +100,11 @@ window.SANKET_DATA = {
       if (summary.active_baseline_exposure > 0) {
         this.portfolio.riskPortfolioPct = ((summary.risk_weighted_exposure / summary.active_baseline_exposure) * 100).toFixed(1);
       }
-      this.portfolio.yoyChange = 14.2; // Simulated YoY increase in monitored projects
-      this.portfolio.modelCalibration = 92.4; // Simulated predictive accuracy
+      this.portfolio.yoyChange = summary.yoy_change !== undefined ? summary.yoy_change : '--';
+      this.portfolio.addedThisQuarter = summary.added_this_quarter !== undefined ? summary.added_this_quarter : '--';
+      this.portfolio.activeTelemetryPct = summary.active_telemetry_pct !== undefined ? summary.active_telemetry_pct : '--';
+      this.portfolio.modelCalibration = summary.model_calibration_accuracy !== undefined ? summary.model_calibration_accuracy : '--';
+      this.portfolio.totalArchiveEntities = summary.archive_entity_count || '--';
 
       this.portfolio.medianWarningLead = summary.historical_median_warning_lead ? Number(summary.historical_median_warning_lead.toFixed(1)) : this.portfolio.medianWarningLead;
       this.portfolio.riskSegments.normal = summary.normal_count || 0;

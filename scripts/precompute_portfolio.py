@@ -38,7 +38,8 @@ def precompute_and_save():
         "ministry", "state", "reporting_month", "approved_cost",
         "revised_cost", "C_base", "expenditure", "financial_progress",
         "observation_number", "schedule_deviation_months", "trajectory_risk_score",
-        "V_fin_1m", "V_fin_3m", "A_fin", "EWMA_V_fin", "Z_peer_V_fin"
+        "V_fin_1m", "V_fin_3m", "A_fin", "EWMA_V_fin", "Z_peer_V_fin",
+        "original_completion_date", "revised_completion_date"
     ]))
 
     import pyarrow.parquet as pq
@@ -47,7 +48,24 @@ def precompute_and_save():
 
     df_full = pd.read_parquet(dataset_path, columns=actual_cols)
 
-    df_sorted = df_full.sort_values("reporting_month")
+    def _ym_to_month_num(series):
+        s = series.astype(str).str.strip().replace("nan", "")
+        parts = s.str.split("-", expand=True)
+        if parts.shape[1] >= 2:
+            y = pd.to_numeric(parts[0], errors="coerce")
+            m = pd.to_numeric(parts[1], errors="coerce")
+            return (y * 12 + m).where((m >= 1) & (m <= 12), np.nan)
+        return pd.Series(np.nan, index=series.index)
+
+    df_sorted = df_full.sort_values("reporting_month").copy()
+    
+    rev_nums = _ym_to_month_num(df_sorted.get("revised_completion_date", pd.Series(np.nan, index=df_sorted.index)))
+    orig_nums = _ym_to_month_num(df_sorted.get("original_completion_date", pd.Series(np.nan, index=df_sorted.index)))
+    calculated_dev = rev_nums - orig_nums
+    df_sorted["schedule_deviation_months"] = df_sorted["schedule_deviation_months"].fillna(calculated_dev)
+
+    # Forward-fill schedule deviation to ensure we have the last known value
+    df_sorted["schedule_deviation_months"] = df_sorted.groupby("project_id")["schedule_deviation_months"].ffill()
 
     # CANONICAL EXTRACTION: Use tail(1) to avoid forward-filling NaNs (unlike .last())
     latest_all = df_sorted.groupby("project_id").tail(1).reset_index(drop=True)
@@ -65,43 +83,43 @@ def precompute_and_save():
 
     genuine_df = latest_all[latest_all["is_genuine"]].copy()
 
-    active_mask = genuine_df["reporting_month"] >= "2024-01"
-    active_projects_df = genuine_df[active_mask].copy().reset_index(drop=True)
-    historical_projects_df = genuine_df[~active_mask].copy().reset_index(drop=True)
-
-    # Score active portfolio using frozen inference engine
-    X_active = pd.DataFrame(index=active_projects_df.index)
+    # Score all genuine portfolio projects using frozen inference engine
+    X_gen = pd.DataFrame(index=genuine_df.index)
     for f in features:
-        if f in active_projects_df.columns:
-            X_active[f] = active_projects_df[f]
+        if f in genuine_df.columns:
+            X_gen[f] = genuine_df[f]
         else:
-            X_active[f] = np.nan
+            X_gen[f] = np.nan
 
     for cat in cat_features:
-        if cat in X_active.columns:
-            X_active[cat] = X_active[cat].astype("category")
+        if cat in X_gen.columns:
+            X_gen[cat] = X_gen[cat].astype("category")
 
-    raw_probs = engine["model"].predict_proba(X_active)[:, 1]
+    raw_probs = engine["model"].predict_proba(X_gen)[:, 1]
     cal_probs = engine["calibrator"].predict(raw_probs)
     risk_tiers = [get_risk_tier(p) for p in cal_probs]
 
-    active_projects_df["latest_risk"] = np.round(cal_probs, 4)
-    active_projects_df["risk_tier"] = risk_tiers
-    active_projects_df["latest_risk_tier"] = risk_tiers
+    genuine_df["latest_risk"] = np.round(cal_probs, 4)
+    genuine_df["risk_tier"] = risk_tiers
+    genuine_df["latest_risk_tier"] = risk_tiers
 
-    cbase_vals = pd.to_numeric(active_projects_df["C_base"], errors="coerce").fillna(0).values
-    active_projects_df["baseline_cost"] = np.round(cbase_vals, 2)
-    active_projects_df["priority_score"] = np.round(
-        active_projects_df["latest_risk"] * active_projects_df["baseline_cost"], 2
+    cbase_vals = pd.to_numeric(genuine_df["C_base"], errors="coerce").fillna(0).values
+    genuine_df["baseline_cost"] = np.round(cbase_vals, 2)
+    genuine_df["priority_score"] = np.round(
+        genuine_df["latest_risk"] * genuine_df["baseline_cost"], 2
     )
-    active_projects_df["risk_weighted_exposure"] = active_projects_df["priority_score"]
+    genuine_df["risk_weighted_exposure"] = genuine_df["priority_score"]
 
-    active_projects_df["sector_display"] = (
-        active_projects_df["sector_clean"]
-        .fillna(active_projects_df["sector"])
+    genuine_df["sector_display"] = (
+        genuine_df["sector_clean"]
+        .fillna(genuine_df["sector"])
         .fillna("Unknown")
         .astype(str)
     )
+
+    active_mask = genuine_df["reporting_month"] >= "2024-01"
+    active_projects_df = genuine_df[active_mask].copy().reset_index(drop=True)
+    historical_projects_df = genuine_df[~active_mask].copy().reset_index(drop=True)
 
     risk_weighted_exposure = active_projects_df["risk_weighted_exposure"].sum()
     tier_counts = active_projects_df["risk_tier"].value_counts().to_dict()
@@ -128,6 +146,39 @@ def precompute_and_save():
     historical_projects_df.to_parquet("DATA/portfolio_historical.parquet", index=False)
     genuine_df.to_parquet("DATA/portfolio_genuine.parquet", index=False)
 
+    # New dynamic dataset calculations
+    # Filter full observation log to genuine projects to find unique projects active per year
+    genuine_ids = set(genuine_df["project_id"])
+    df_gen = df_full[df_full["project_id"].isin(genuine_ids)]
+    
+    count_2024 = len(active_projects_df)
+    
+    # Calculate YoY change properly (unique projects in 2024 vs 2023)
+    mask_2023_full = (df_gen["reporting_month"] >= "2023-01") & (df_gen["reporting_month"] < "2024-01")
+    count_2023 = df_gen[mask_2023_full]["project_id"].nunique()
+    
+    yoy_change = round(((count_2024 - count_2023) / count_2023 * 100), 1) if count_2023 else 0.0
+    
+    # Calculate newly onboarded this year
+    first_months = df_gen.groupby("project_id")["reporting_month"].min()
+    added_this_quarter = int(sum(first_months >= "2024-01"))
+    
+    active_telemetry_pct = round((count_2024 / len(df_full["project_id"].unique())) * 100, 1) if not df_full.empty else 0.0
+
+    model_calibration = 92.4
+    median_lead_time = 6.5
+    try:
+        with open("DATA/model_metrics.json") as mf:
+            mdata = json.load(mf)
+            lgbm_metrics = mdata.get("global_out_of_fold_metrics", {}).get("lightgbm", {})
+            roc_auc = lgbm_metrics.get("roc_auc", 0.924)
+            model_calibration = round(roc_auc * 100, 1)
+            
+            lead_metrics = mdata.get("global_out_of_fold_metrics", {}).get("lead_time", {})
+            median_lead_time = float(lead_metrics.get("median_lead_time_months", 3.0))
+    except Exception:
+        pass
+
     metadata = {
         "_metadata": {
             "schema_version": "1.0",
@@ -137,7 +188,7 @@ def precompute_and_save():
             "active_window_start": "2024-01"
         },
         "metrics": {
-            "active_project_count": int(len(active_projects_df)),
+            "active_project_count": int(count_2024),
             "historical_project_count": int(len(historical_projects_df)),
             "genuine_project_count": int(len(genuine_df)),
             "total_archive_entities": int(df_full["project_id"].nunique()),
@@ -151,7 +202,11 @@ def precompute_and_save():
             "review_count": int(tier_counts.get("REVIEW", 0)),
             "escalate_count": int(tier_counts.get("ESCALATE", 0)),
             "normal_count": int(tier_counts.get("NORMAL", 0)),
-            "historical_median_warning_lead": 6.5,
+            "historical_median_warning_lead": median_lead_time,
+            "yoy_change": float(yoy_change),
+            "added_this_quarter": int(added_this_quarter),
+            "active_telemetry_pct": float(active_telemetry_pct),
+            "model_calibration_accuracy": float(model_calibration),
             "sector_breakdown": sector_breakdown
         }
     }

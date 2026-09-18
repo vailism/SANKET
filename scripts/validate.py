@@ -21,14 +21,7 @@ from collections import defaultdict
 from typing import Dict, List, Any
 import pandas as pd
 
-def parse_ym(ym_str: str) -> datetime:
-    return datetime.strptime(ym_str, "%Y-%m")
 
-def months_between(start_ym: str, end_ym: str) -> int:
-    """Calculate inclusive calendar months between two YYYY-MM strings."""
-    d1 = parse_ym(start_ym)
-    d2 = parse_ym(end_ym)
-    return (d2.year - d1.year) * 12 + (d2.month - d1.month) + 1
 
 def validate_dataset(monthly_csv_path: str, output_dir: str):
     if not os.path.exists(monthly_csv_path):
@@ -113,7 +106,7 @@ def validate_dataset(monthly_csv_path: str, output_dir: str):
         fin_prog = str(r.get("financial_progress", "") or "").strip()
         if fin_prog and fin_prog != "nan":
             try:
-                ff = float(fin_prog)
+                float(fin_prog)
                 financial_prog_present += 1
             except ValueError:
                 pass

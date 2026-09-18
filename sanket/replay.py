@@ -27,13 +27,7 @@ def ym_to_int(ym: Any) -> Optional[int]:
         return int(parts[0]) * 12 + int(parts[1])
     return None
 
-def int_to_ym(val: int) -> str:
-    y = val // 12
-    m = val % 12
-    if m == 0:
-        y -= 1
-        m = 12
-    return f"{y:04d}-{m:02d}"
+
 
 def replay_project_from_dataframe(
     df_proj: pd.DataFrame,
@@ -203,22 +197,18 @@ def replay_project_from_dataframe(
 
 def get_project_replay(
     project_id: str,
-    dataset_path: str = "DATA/model_dataset.parquet",
+    dataset_path: str = "DATA/datasets/LATEST",
     engine: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Retrieve and reconstruct historical point-in-time replay for a specific project_id.
     Fails cleanly with ValueError if project is unknown.
     """
-    actual_path = get_artifact(dataset_path)
-    if not os.path.exists(actual_path):
-        raise FileNotFoundError(f"Dataset '{actual_path}' not found.")
-
-    # Read project observations
-    p_df = pd.read_parquet(
-        actual_path,
-        filters=[("project_id", "==", str(project_id))]
-    )
+    from sanket.dataset import DatasetReader
+    
+    # Read project observations using DatasetReader for efficient partition targeting
+    reader = DatasetReader(base_dir=dataset_path)
+    p_df = reader.read_project("model_dataset", project_id=str(project_id))
 
     if p_df.empty:
         raise ValueError(f"Project ID '{project_id}' not found in longitudinal dataset.")
@@ -227,12 +217,4 @@ def get_project_replay(
 
     return replay_project_from_dataframe(p_df, engine=engine)
 
-def replay_project(
-    project_id: str,
-    dataset_path: str = "DATA/model_dataset.parquet",
-    engine: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """
-    Alias for get_project_replay.
-    """
-    return get_project_replay(project_id, dataset_path=dataset_path, engine=engine)
+

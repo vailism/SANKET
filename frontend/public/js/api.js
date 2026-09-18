@@ -37,11 +37,12 @@ const API = (() => {
       if (minRiskTier) url += `&min_risk_tier=${encodeURIComponent(minRiskTier)}`;
       return fetchJson(url);
     },
-    async getProjects(search = '', sector = '', riskTier = '', limit = 50, offset = 0) {
+    async getProjects(search = '', sector = '', riskTier = '', limit = 50, offset = 0, includeHistorical = false) {
       let url = `/projects?limit=${limit}&offset=${offset}`;
       if (search) url += `&search=${encodeURIComponent(search)}`;
       if (sector) url += `&sector=${encodeURIComponent(sector)}`;
       if (riskTier) url += `&risk_tier=${encodeURIComponent(riskTier)}`;
+      if (includeHistorical) url += `&include_historical=true`;
       return fetchJson(url);
     },
     async getProjectDetails(projectId) {

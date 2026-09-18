@@ -30,23 +30,16 @@ Executes:
 import os
 import sys
 import json
-import yaml
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Any, Tuple
-from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import (
     brier_score_loss,
     average_precision_score,
-    roc_auc_score,
-    precision_score,
-    recall_score,
-    f1_score,
     confusion_matrix
 )
-import lightgbm as lgb
 
 from sanket.model import (
     load_model_config,
@@ -311,8 +304,8 @@ def run_validation_audit():
     global_brier_iso = brier_score_loss(oof_y_true, oof_iso_probs)
 
     global_ece_raw, decile_raw_df = compute_ece(oof_y_true, oof_raw_probs)
-    global_ece_platt, decile_platt_df = compute_ece(oof_y_true, oof_platt_probs)
-    global_ece_iso, decile_iso_df = compute_ece(oof_y_true, oof_iso_probs)
+    global_ece_platt, _ = compute_ece(oof_y_true, oof_platt_probs)
+    global_ece_iso, _ = compute_ece(oof_y_true, oof_iso_probs)
 
     print(f"  Global Brier Score: Raw = {global_brier_raw:.4f} | Platt = {global_brier_platt:.4f} | Isotonic = {global_brier_iso:.4f}")
     print(f"  Global ECE        : Raw = {global_ece_raw:.4f} | Platt = {global_ece_platt:.4f} | Isotonic = {global_ece_iso:.4f}")

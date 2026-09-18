@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Fetch live data
       const [summary, projectsRes] = await Promise.all([
         API.getDashboardSummary(),
-        API.getProjects('', '', '', 500, 0)
+        API.getProjects('', '', '', 5000, 0)
       ]);
 
       // Hydrate SANKET_DATA portfolio summary
@@ -29,7 +29,9 @@ document.addEventListener('DOMContentLoaded', () => {
         severityClass: (p.latest_risk_tier || 'unknown').toLowerCase(),
         location: `${p.state || '--'} • ${p.sector || '--'}`,
         ministry: p.ministry || '--',
-        variance: p.schedule_deviation_months || 0,
+        progress: p.financial_progress || 0,
+        lastReported: p.latest_observation || 'Unknown',
+        variance: p.schedule_deviation_months != null ? p.schedule_deviation_months : null,
         varianceLabel: 'Months',
         value: Math.round((p.baseline_cost || p.approved_cost || 0))
       }));
@@ -78,7 +80,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (totalMonitoredValue) totalMonitoredValue.textContent = SANKET_DATA.portfolio.totalMonitored.toLocaleString();
 
     const yoyChange = document.getElementById('valYoyChange');
-    if (yoyChange) yoyChange.textContent = `${SANKET_DATA.portfolio.yoyChange}% YoY ▲`;
+    if (yoyChange) yoyChange.textContent = `${SANKET_DATA.portfolio.yoyChange}% YoY ${SANKET_DATA.portfolio.yoyChange >= 0 ? '▲' : '▼'}`;
+
+    const totalArchiveValue = document.getElementById('valTotalArchive');
+    if (totalArchiveValue) totalArchiveValue.textContent = SANKET_DATA.portfolio.totalArchiveEntities ? SANKET_DATA.portfolio.totalArchiveEntities.toLocaleString() : '--';
+
+    const activeTelemetryPct = document.getElementById('valActiveTelemetryPct');
+    if (activeTelemetryPct) activeTelemetryPct.textContent = `${SANKET_DATA.portfolio.activeTelemetryPct}% Active Telemetry`;
+
+    const addedThisQuarter = document.getElementById('valAddedThisQuarter');
+    if (addedThisQuarter) addedThisQuarter.textContent = `+${SANKET_DATA.portfolio.addedThisQuarter} this quarter`;
 
     // Update "High Risk Excursions" (card 1)
     const excursionsValue = document.getElementById('valHighRisk');
@@ -128,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    // Update "Median Warning Lead" (card 3)
+    // Update "Median Warning Lead"
     const leadValue = document.getElementById('valMedianLead');
     if (leadValue) leadValue.textContent = SANKET_DATA.portfolio.medianWarningLead;
 
@@ -146,12 +157,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const searchInput = document.getElementById('projectSearchInput');
     const filterSelect = document.getElementById('projectRiskFilter');
+    const sortSelect = document.getElementById('projectSortFilter');
     const query = searchInput ? searchInput.value.toLowerCase() : '';
     const riskFilter = filterSelect ? filterSelect.value : 'ALL';
+    const sortFilter = sortSelect ? sortSelect.value : 'RISK_DESC';
+
+    const isCompletedView = window.currentView === 'view-completed';
 
     const filteredProjects = SANKET_DATA.projects.filter(p => {
       const matchesQuery = !query || p.name.toLowerCase().includes(query) || p.location.toLowerCase().includes(query) || p.ministry.toLowerCase().includes(query);
-      const matchesRisk = riskFilter === 'ALL' || p.severity === riskFilter;
+      let matchesRisk = true;
+      if (isCompletedView) {
+          matchesRisk = p.progress >= 100;
+      } else {
+          matchesRisk = riskFilter === 'ALL' || p.severity === riskFilter;
+      }
       return matchesQuery && matchesRisk;
     });
 
@@ -159,6 +179,19 @@ document.addEventListener('DOMContentLoaded', () => {
       listEl.innerHTML = '<div style="padding:40px 20px; text-align:center; color:#64748b; font-size:13px;">No projects match your search criteria.</div>';
       return;
     }
+
+    filteredProjects.sort((a, b) => {
+      if (sortFilter === 'RISK_DESC') {
+        return b.score - a.score;
+      } else if (sortFilter === 'RISK_ASC') {
+        return a.score - b.score;
+      } else if (sortFilter === 'NEWEST') {
+        return (b.lastReported || '').localeCompare(a.lastReported || '');
+      } else if (sortFilter === 'OLDEST') {
+        return (a.lastReported || '').localeCompare(b.lastReported || '');
+      }
+      return 0;
+    });
 
     // Generate simulated sparkline based on final score and ID seed
     function generateSparklineSVG(score, idStr) {
@@ -192,48 +225,68 @@ document.addEventListener('DOMContentLoaded', () => {
       return `<svg width="${w}" height="${h}" viewBox="0 -5 ${w} ${h+10}" style="overflow: visible;"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /><circle cx="${w}" cy="${h - (score / 100 * h)}" r="2.5" fill="#000000" /></svg>`;
     }
 
-    const isInterventions = document.querySelector('.dashboard-grid')?.classList.contains('view-mode-interventions');
+    const isInterventions = window.currentView === 'view-interventions';
     let tableHTML = '';
 
     if (isInterventions) {
-      tableHTML = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; padding: 16px; background: #f1f5f9; min-height: 100%;">';
+      tableHTML = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 24px; padding: 24px; background: #f8f9fa; min-height: 100%; border-radius: 16px;">';
       filteredProjects.forEach((p, idx) => {
-        const isSelected = idx === 0 ? 'selected' : '';
-        const color = p.score > 70 ? '#ef4444' : p.score > 40 ? '#f59e0b' : '#10b981';
-        const varianceColor = p.variance > 0 ? '#ef4444' : (p.variance < 0 ? '#10b981' : '#94a3b8');
-        const varianceText = p.variance === 0 ? 'On Track' : `${Math.abs(p.variance)}m ${p.variance > 0 ? 'Delay' : 'Fast'}`;
+        // Material Colors
+        const isRed = p.score > 70;
+        const isYellow = p.score > 40 && p.score <= 70;
+        
+        const mRedText = '#d93025'; const mRedBg = '#fce8e6';
+        const mYellowText = '#b06000'; const mYellowBg = '#fef7e0';
+        const mGreenText = '#1e8e3e'; const mGreenBg = '#e6f4ea';
+        const mGrayText = '#5f6368'; const mGrayBg = '#f1f3f4';
+        const mBlue = '#1a73e8';
+
+        const severityText = isRed ? mRedText : isYellow ? mYellowText : mGreenText;
+        const severityBg = isRed ? mRedBg : isYellow ? mYellowBg : mGreenBg;
+        
+        let varText, varBg, varColor;
+        if (p.variance > 0) { varText = 'Delay'; varColor = mRedText; varBg = mRedBg; }
+        else if (p.variance < 0) { varText = 'Ahead'; varColor = mGreenText; varBg = mGreenBg; }
+        else { varText = 'On Track'; varColor = mGrayText; varBg = mGrayBg; }
+
+        const varianceStr = p.variance === 0 ? 'On Track' : `${Math.abs(p.variance)}m ${varText}`;
         
         tableHTML += `
-          <div class="project-row ${isSelected}" data-id="${p.id}" style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; cursor: pointer; position: relative; border-top: 4px solid ${color}; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03); display: flex; flex-direction: column; transition: transform 0.2s, box-shadow 0.2s;">
+          <div class="project-row" data-id="${p.id}" style="background: #ffffff; border: 1px solid #e0e0e0; border-radius: 16px; padding: 24px; cursor: pointer; display: flex; flex-direction: column; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);" onmouseover="this.style.boxShadow='0 4px 12px 3px rgba(0,0,0,0.04)'; this.style.transform='translateY(-2px)';" onmouseout="this.style.boxShadow='none'; this.style.transform='translateY(0)';">
+            
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
-              <div style="flex: 1; padding-right: 12px;">
-                <div style="font-weight: 800; color: #0f172a; font-size: 15px; margin-bottom: 6px; line-height: 1.3;">${p.name}</div>
-                <div style="font-size: 11px; color: #64748b; display: flex; align-items: center; gap: 4px;">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                  ${p.location} • ${p.ministry}
+              <span style="background: ${severityBg}; color: ${severityText}; padding: 6px 14px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: 0.3px;">${p.severity}</span>
+              <span style="color: ${mGrayText}; font-size: 12px; font-weight: 500;">ID: ${p.id}</span>
+            </div>
+
+            <div style="font-weight: 500; color: #202124; font-size: 18px; margin-bottom: 8px; line-height: 1.3;">${p.name}</div>
+            
+            <div style="font-size: 13px; color: #5f6368; display: flex; align-items: center; gap: 6px; margin-bottom: 24px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+              ${p.location} • ${p.ministry}
+            </div>
+
+            <div style="display: flex; gap: 32px; margin-bottom: 32px;">
+              <div>
+                <div style="font-size: 12px; color: #5f6368; margin-bottom: 2px; font-weight: 500;">Risk Score</div>
+                <div style="font-size: 36px; font-weight: 400; color: ${severityText}; line-height: 1;">${p.score}</div>
+              </div>
+              <div>
+                <div style="font-size: 12px; color: #5f6368; margin-bottom: 8px; font-weight: 500;">Schedule</div>
+                <div style="font-size: 13px; font-weight: 600; color: ${varColor}; background: ${varBg}; display: inline-block; padding: 6px 12px; border-radius: 8px;">
+                  ${varianceStr}
                 </div>
               </div>
-              <span class="pc-badge badge-${p.severityClass}" style="flex-shrink: 0; padding: 4px 8px; font-size: 10px;">${p.severity}</span>
             </div>
             
-            <div style="display: flex; gap: 24px; margin-bottom: 20px; background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #f1f5f9;">
+            <div style="margin-top: auto; border-top: 1px solid #f1f3f4; padding-top: 20px; display: flex; justify-content: space-between; align-items: center;">
               <div>
-                <div style="font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 2px;">Risk Score</div>
-                <div style="font-size: 22px; font-weight: 900; color: ${color};">${p.score}</div>
+                <div style="font-size: 11px; color: #5f6368; margin-bottom: 2px;">Project Value</div>
+                <div style="font-size: 16px; font-weight: 500; color: #202124;">₹${p.value} Cr</div>
               </div>
-              <div style="width: 1px; background: #e2e8f0;"></div>
-              <div>
-                <div style="font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 2px;">Deviation</div>
-                <div style="font-size: 16px; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: ${varianceColor}; margin-top: 4px;">${varianceText}</div>
-              </div>
-            </div>
-            
-            <div style="margin-top: auto; border-top: 1px dashed #e2e8f0; padding-top: 16px; display: flex; justify-content: space-between; align-items: center;">
-              <div>
-                <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Monitored Value</div>
-                <div style="font-size: 13px; color: #0f172a; font-family: 'JetBrains Mono', monospace; font-weight: 600;">₹${p.value} Cr</div>
-              </div>
-              <button class="action-btn" style="background: ${color}; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">Take Action</button>
+              <button style="background: ${mBlue}; color: #ffffff; border: none; padding: 10px 24px; border-radius: 24px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.12);" onmouseover="this.style.background='#174ea6'" onmouseout="this.style.background='${mBlue}'">
+                View Details
+              </button>
             </div>
           </div>
         `;
@@ -258,19 +311,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
       filteredProjects.forEach((p, idx) => {
         const isSelected = idx === 0 ? 'selected' : '';
+        const varianceColor = p.variance == null ? '#94a3b8' : (p.variance > 0 ? '#ef4444' : (p.variance < 0 ? '#10b981' : '#94a3b8'));
+        const varianceText = p.variance == null ? 'Unknown' : (p.variance === 0 ? 'On Schedule' : `${Math.abs(p.variance)} ${p.variance > 0 ? 'Months Delay' : 'Months Ahead'}`);
+        
         tableHTML += `
-          <tr class="project-row ${isSelected}" data-id="${p.id}" style="cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.05); transition: background 0.2s;">
-            <td style="padding: 12px 8px;"><span class="pc-badge badge-${p.severityClass}">${p.severity}</span></td>
-            <td style="padding: 12px 8px; font-weight: bold; color: ${p.score > 70 ? '#ef4444' : p.score > 40 ? '#f59e0b' : '#10b981'};">${p.score}/100</td>
-            <td style="padding: 12px 8px;">${generateSparklineSVG(p.score, p.id)}</td>
-            <td style="padding: 12px 8px;">
-              <div style="font-weight: 600; color: #0f172a; margin-bottom: 4px;">${p.name}</div>
-              <div style="font-size: 11px; color: #64748b;">${p.ministry}</div>
+          <tr class="project-row ${isSelected}" data-id="${p.id}" style="cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.05); transition: all 0.2s; background: white;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
+            <td style="padding: 16px 8px;"><span class="pc-badge badge-${p.severityClass}" style="padding: 4px 8px; font-weight: 700;">${p.severity}</span></td>
+            <td style="padding: 16px 8px; font-weight: 800; font-size: 14px; color: ${p.score > 70 ? '#ef4444' : p.score > 40 ? '#f59e0b' : '#10b981'};">${p.score}<span style="font-size: 11px; font-weight: 600; color: #94a3b8;">/100</span></td>
+            <td style="padding: 16px 8px;">${generateSparklineSVG(p.score, p.id)}</td>
+            <td style="padding: 16px 8px;">
+              <div style="font-weight: 700; color: #0f172a; margin-bottom: 6px; font-size: 13px;">${p.name}</div>
+              <div style="font-size: 11px; color: ${p.progress >= 100 ? '#10b981' : '#64748b'}; font-weight: 500; display: flex; align-items: center; gap: 4px;">
+                ${p.progress >= 100 ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg> Completed' : (p.ministry !== '—' ? p.ministry : 'Ongoing')} • Last Reported: ${p.lastReported}
+              </div>
             </td>
-            <td style="padding: 12px 8px; color: #64748b;">${p.location}</td>
-            <td style="padding: 12px 8px; text-align: right; font-family: 'JetBrains Mono', monospace; color: #0f172a;">
-              <div>₹${p.value} Cr</div>
-              <div style="font-size: 11px; color: ${p.variance > 0 ? '#ef4444' : (p.variance < 0 ? '#10b981' : '#94a3b8')}; margin-top: 4px;">${p.variance === 0 ? 'On Schedule' : `${Math.abs(p.variance)} ${p.variance > 0 ? 'Months Delay' : 'Months Ahead'}`}</div>
+            <td style="padding: 16px 8px; color: #64748b; font-size: 12px; font-weight: 500;">${p.location}</td>
+            <td style="padding: 16px 8px; text-align: right;">
+              <div style="font-size: 14px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: #0f172a;">₹${p.value} Cr</div>
+              <div style="font-size: 11px; font-weight: 600; font-family: 'JetBrains Mono', monospace; color: ${varianceColor}; margin-top: 6px; background: ${varianceColor}15; display: inline-block; padding: 2px 6px; border-radius: 4px;">${varianceText}</div>
             </td>
           </tr>
         `;
@@ -499,8 +557,8 @@ document.addEventListener('DOMContentLoaded', () => {
       let colorOverride = '';
       if (colorClass === 'meter-cyan' && v < 0) colorOverride = 'background: #ef4444; box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);';
       else if (colorClass === 'meter-green' && v < 0) colorOverride = 'background: #ef4444; box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);';
-      const displayVal = Math.abs(v) > 99 ? Math.round(v) : v.toFixed(1);
-      return `<div class="sensor-meter"><div class="meter-track"><div class="meter-fill ${colorClass}" style="height:${height}%; ${colorOverride}"></div></div><span class="meter-val" style="font-size:11px">${displayVal}</span></div>`;
+      const displayVal = Math.abs(v) > 99 ? v.toFixed(1) : v.toFixed(3);
+      return `<div class="sensor-meter"><div class="meter-track"><div class="meter-fill ${colorClass}" style="height:${height}%; ${colorOverride}"></div></div><span class="meter-val" style="font-size:9.5px; letter-spacing:-0.2px;">${displayVal}</span></div>`;
     };
 
     const kinematicsHtml = `
@@ -514,7 +572,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Top Explanations
     const causalConfidence = document.getElementById('causalConfidence');
-    if (causalConfidence) causalConfidence.textContent = `${((detail.latest_prediction?.pred_prob || 0) * 100).toFixed(1)}% Confidence`;
+    if (causalConfidence) {
+      const p = detail.latest_prediction?.pred_prob || 0;
+      const confidence = Math.max(p, 1 - p) * 100;
+      causalConfidence.textContent = `${confidence.toFixed(1)}% Confidence`;
+    }
     const explanations = detail.top_explanations || [];
     const maxContrib = Math.max(...explanations.map(e => Math.abs(e.contribution || 0)), 0.01);
     const factorsHtml = explanations.map((exp, idx) => {
@@ -524,10 +586,10 @@ document.addEventListener('DOMContentLoaded', () => {
       return `
         <div style="margin-bottom: 8px;">
           <div style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 3px;">
-            <span style="font-weight: 700; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%;">${(exp.feature || '').toUpperCase()}</span>
-            <span style="font-family: 'JetBrains Mono', monospace; color: ${color};">${c >= 0 ? '+' : ''}${(c * 100).toFixed(1)}%</span>
+            <span style="font-weight: 800; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%;">${(exp.feature || '').toUpperCase()}</span>
+            <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700; color: ${color};">${c >= 0 ? '+' : ''}${(c * 100).toFixed(1)}%</span>
           </div>
-          <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px; overflow: hidden;">
+          <div style="width: 100%; height: 6px; background: #f1f5f9; border-radius: 3px; overflow: hidden;">
             <div style="width: ${pct}%; height: 100%; background: ${color}; border-radius: 3px; transition: width 0.6s ease;"></div>
           </div>
           <div style="font-size: 9px; color: #94a3b8; margin-top: 3px; line-height: 1.2;">${exp.explanation || ''}</div>
@@ -635,18 +697,16 @@ document.addEventListener('DOMContentLoaded', () => {
       item.classList.add('active');
 
       const targetView = item.getAttribute('data-target');
+      window.currentView = targetView;
+
       if (targetView && mainGrid) {
         // Remove existing view classes
         mainGrid.classList.remove('view-mode-dashboard', 'view-mode-projects', 'view-mode-trajectory', 'view-mode-interventions');
-        
+
         // Add specific view class based on the target
         if (targetView === 'view-dashboard') {
-          // If dashboard, just clear classes to show default 3-column view, 
-          // or add specific class if mobile. For now, default 3-column grid handles it.
-          // Wait, the CSS we added uses .view-mode-dashboard to show only col-metrics.
-          // The user expects a responsive app. If on desktop they expect 3 columns for "Dashboard"
-          // We can just remove all view-mode-* classes to revert to normal grid.
-        } else if (targetView === 'view-projects' || targetView === 'view-interventions') {
+          // If dashboard, just clear classes to show default 3-column view
+        } else if (targetView === 'view-projects' || targetView === 'view-interventions' || targetView === 'view-completed') {
           if (targetView === 'view-interventions') {
             mainGrid.classList.add('view-mode-interventions');
             mainGrid.classList.remove('view-mode-projects');
@@ -655,18 +715,75 @@ document.addEventListener('DOMContentLoaded', () => {
             mainGrid.classList.remove('view-mode-interventions');
           }
           
-          // Make Risk Interventions and All Projects look different
+          // Set Titles and Filters
           const title = document.querySelector('.projects-title');
           const riskFilter = document.getElementById('projectRiskFilter');
-          if (title && riskFilter) {
+          const filterWrap = riskFilter ? riskFilter.parentElement : null;
+
+          if (title) {
             if (targetView === 'view-interventions') {
               title.innerHTML = 'RISK<br/>INTERVENTIONS';
-              riskFilter.value = 'ESCALATE';
+              if (riskFilter) riskFilter.value = 'ESCALATE';
+              if (filterWrap) filterWrap.style.display = '';
+            } else if (targetView === 'view-completed') {
+              title.innerHTML = 'COMPLETED<br/>PROJECTS';
+              if (filterWrap) filterWrap.style.display = 'none';
             } else {
               title.innerHTML = 'ONGOING<br/>PROJECTS';
-              riskFilter.value = 'ALL';
+              if (riskFilter) riskFilter.value = 'ALL';
+              if (filterWrap) filterWrap.style.display = '';
             }
-            riskFilter.dispatchEvent(new Event('change'));
+          }
+          
+          // Fetch appropriate datasets
+          if (targetView === 'view-completed') {
+            const listEl = document.querySelector('.project-list');
+            if (listEl) listEl.innerHTML = '<div style="color:#94a3b8; text-align:center; padding:20px; font-size:13px;">Loading Historical Projects...</div>';
+            
+            API.getProjects('', '', '', 5000, 0, true).then(results => {
+              SANKET_DATA.projects = (results.projects || []).map(p => ({
+                  id: p.project_id,
+                  name: p.project_name,
+                  score: Math.round(p.latest_risk_tier === 'NORMAL' ? 0 : (p.latest_risk || 0) * 100),
+                  severity: p.latest_risk_tier || 'UNKNOWN',
+                  severityClass: (p.latest_risk_tier || 'unknown').toLowerCase(),
+                  location: `${p.state || '--'} • ${p.sector || '--'}`,
+                  ministry: p.ministry || '--',
+                  progress: p.financial_progress || 0,
+                  lastReported: p.latest_observation || 'Unknown',
+                  variance: p.schedule_deviation_months != null ? p.schedule_deviation_months : null,
+                  varianceLabel: 'Months',
+                  value: Math.round((p.baseline_cost || p.approved_cost || 0))
+              }));
+              renderProjectCards();
+            });
+          } else {
+            // Re-fetch only if we previously fetched historical projects (which changes SANKET_DATA.projects)
+            // But doing it unconditionally is safer and fast because the local limit is 5000.
+            if (SANKET_DATA.projects.length > SANKET_DATA.portfolio.active_project_count) {
+                const listEl = document.querySelector('.project-list');
+                if (listEl) listEl.innerHTML = '<div style="color:#94a3b8; text-align:center; padding:20px; font-size:13px;">Loading Ongoing Projects...</div>';
+                
+                API.getProjects('', '', '', 5000, 0, false).then(results => {
+                  SANKET_DATA.projects = (results.projects || []).map(p => ({
+                      id: p.project_id,
+                      name: p.project_name,
+                      score: Math.round(p.latest_risk_tier === 'NORMAL' ? 0 : (p.latest_risk || 0) * 100),
+                      severity: p.latest_risk_tier || 'UNKNOWN',
+                      severityClass: (p.latest_risk_tier || 'unknown').toLowerCase(),
+                      location: `${p.state || '--'} • ${p.sector || '--'}`,
+                      ministry: p.ministry || '--',
+                      progress: p.financial_progress || 0,
+                      lastReported: p.latest_observation || 'Unknown',
+                      variance: p.schedule_deviation_months != null ? p.schedule_deviation_months : null,
+                      varianceLabel: 'Months',
+                      value: Math.round((p.baseline_cost || p.approved_cost || 0))
+                  }));
+                  if (riskFilter) riskFilter.dispatchEvent(new Event('change'));
+                });
+            } else {
+                if (riskFilter) riskFilter.dispatchEvent(new Event('change'));
+            }
           }
           
         } else if (targetView === 'view-trajectory') {
@@ -690,7 +807,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         try {
           if (!term) {
-            const projectsRes = await API.getProjects('', '', '', 500, 0);
+            const projectsRes = await API.getProjects('', '', '', 5000, 0);
             SANKET_DATA.projects = (projectsRes.projects || []).map(p => ({
               id: p.project_id,
               name: p.project_name,
@@ -699,7 +816,9 @@ document.addEventListener('DOMContentLoaded', () => {
               severityClass: (p.latest_risk_tier || 'unknown').toLowerCase(),
               location: `${p.state || '--'} • ${p.sector || '--'}`,
               ministry: p.ministry || '--',
-              variance: p.schedule_deviation_months || 0,
+              progress: p.financial_progress || 0,
+              lastReported: p.latest_observation || 'Unknown',
+              variance: p.schedule_deviation_months != null ? p.schedule_deviation_months : null,
               varianceLabel: 'Months',
               value: Math.round((p.baseline_cost || p.approved_cost || 0))
             }));
@@ -716,7 +835,9 @@ document.addEventListener('DOMContentLoaded', () => {
             severityClass: (p.latest_risk_tier || 'unknown').toLowerCase(),
             location: `${p.state || '--'} • ${p.sector || '--'}`,
             ministry: p.ministry || '--',
-            variance: p.schedule_deviation_months || 0,
+            progress: p.financial_progress || 0,
+            lastReported: p.latest_observation || 'Unknown',
+            variance: p.schedule_deviation_months != null ? p.schedule_deviation_months : null,
             varianceLabel: 'Months',
             value: Math.round((p.baseline_cost || p.approved_cost || 0))
           }));
@@ -741,8 +862,10 @@ document.addEventListener('DOMContentLoaded', () => {
   /* ── Local Table Search & Filter ───────────────────────── */
   const localSearch = document.getElementById('projectSearchInput');
   const riskFilter = document.getElementById('projectRiskFilter');
+  const sortFilter = document.getElementById('projectSortFilter');
   if (localSearch) localSearch.addEventListener('input', renderProjectCards);
   if (riskFilter) riskFilter.addEventListener('change', renderProjectCards);
+  if (sortFilter) sortFilter.addEventListener('change', renderProjectCards);
 
   /* ── Export CSV Logic ───────────────────────────────── */
   const btnExport = document.getElementById('btnExportReport');
@@ -775,7 +898,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* ── Initialize AI Assistant ────────────────────────── */
-  Assistant.init();
+  // Assistant.init();
 
   /* ── Live clock in telemetry ────────────────────────── */
   function updateTelemetry() {

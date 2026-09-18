@@ -5,7 +5,6 @@ import json
 import psutil
 import os
 from sanket.inference import predict_point_in_time, predict_batch_in_time, load_inference_engine
-from sanket.api import sanitize_for_json
 
 def check_parity_and_benchmark():
     df = pd.read_parquet("DATA/model_dataset.parquet")

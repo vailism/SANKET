@@ -58,20 +58,20 @@ const Charts = (() => {
     function xPos(i) { return padL + (n > 1 ? (i / (n - 1)) * chartW : chartW / 2); }
     function yPos(v) { return padT + chartH - (v / yMax) * chartH; }
 
-    function polyline(data, color, dash = false) {
+    function polyline(data, color, width, dash = false) {
       const pts = data.map((v, i) => v !== null ? `${xPos(i)},${yPos(v)}` : null).filter(Boolean).join(' ');
       if (!pts) return '';
-      return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2"
+      return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="${width}"
         stroke-linecap="round" stroke-linejoin="round"
-        ${dash ? 'stroke-dasharray="6 4"' : ''}/>`;
+        ${dash ? 'stroke-dasharray="6 6"' : ''}/>`;
     }
 
     // Grid lines
     let gridLines = '';
     for (let pct = 0; pct <= yMax; pct += Math.max(25, Math.ceil(yMax / 4 / 25) * 25)) {
       const y = yPos(pct);
-      gridLines += `<line x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}" stroke="#e5e7eb" stroke-width=".7"/>`;
-      gridLines += `<text x="${padL - 4}" y="${y + 3}" fill="#9ca3af" font-size="8" text-anchor="end" font-family="'JetBrains Mono', monospace">${pct}%</text>`;
+      gridLines += `<line x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}" stroke="#f1f5f9" stroke-width="1"/>`;
+      gridLines += `<text x="${padL - 6}" y="${y + 3}" fill="#94a3b8" font-size="8" text-anchor="end" font-weight="600" font-family="'JetBrains Mono', monospace">${pct}%</text>`;
     }
 
     // Shaded area between contractor and sanket (discrepancy zone)
@@ -97,9 +97,9 @@ const Charts = (() => {
       const anomalyLines = anomalyPoint.label.split('\\n');
       annotations += `
         <!-- Anomaly marker -->
-        <line x1="${anomalyX}" y1="${anomalyY - 20}" x2="${anomalyX}" y2="${anomalyY}" stroke="#ef4444" stroke-width="1" stroke-dasharray="3 2"/>
-        <rect x="${anomalyX - 80}" y="${anomalyY - 52}" width="160" height="30" rx="4" fill="#0c1f37" opacity=".92"/>
-        <text x="${anomalyX}" y="${anomalyY - 38}" fill="#f87171" font-size="7.5" text-anchor="middle" font-weight="700" font-family="'JetBrains Mono', monospace">${anomalyLines[0]}</text>
+        <line x1="${anomalyX}" y1="${anomalyY - 20}" x2="${anomalyX}" y2="${anomalyY}" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="3 2"/>
+        <rect x="${anomalyX - 80}" y="${anomalyY - 52}" width="160" height="30" rx="4" fill="#0f172a" opacity=".95" box-shadow="0 4px 6px rgba(0,0,0,0.1)"/>
+        <text x="${anomalyX}" y="${anomalyY - 38}" fill="#f87171" font-size="8" text-anchor="middle" font-weight="800" font-family="'JetBrains Mono', monospace">${anomalyLines[0]}</text>
         <text x="${anomalyX}" y="${anomalyY - 27}" fill="#94a3b8" font-size="7" text-anchor="middle" font-family="'JetBrains Mono', monospace">${anomalyLines[1] || ''}</text>
       `;
     }
@@ -111,9 +111,9 @@ const Charts = (() => {
       const gapX = xPos(dIdx);
       annotations += `
         <!-- Discrepancy gap line -->
-        <line x1="${gapX + 8}" y1="${gapTopY}" x2="${gapX + 8}" y2="${gapBotY}" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="4 2"/>
-        <rect x="${gapX + 14}" y="${(gapTopY + gapBotY) / 2 - 10}" width="120" height="18" rx="3" fill="rgba(239,68,68,.12)" stroke="#ef4444" stroke-width=".7"/>
-        <text x="${gapX + 74}" y="${(gapTopY + gapBotY) / 2 + 2}" fill="#ef4444" font-size="8" font-weight="700" text-anchor="middle" font-family="'JetBrains Mono', monospace">${discrepancyGap.label}</text>
+        <line x1="${gapX + 8}" y1="${gapTopY}" x2="${gapX + 8}" y2="${gapBotY}" stroke="#ef4444" stroke-width="2" stroke-dasharray="4 3"/>
+        <rect x="${gapX + 14}" y="${(gapTopY + gapBotY) / 2 - 10}" width="120" height="18" rx="4" fill="#fef2f2" stroke="#fca5a5" stroke-width="1"/>
+        <text x="${gapX + 74}" y="${(gapTopY + gapBotY) / 2 + 3}" fill="#ef4444" font-size="8" font-weight="800" text-anchor="middle" font-family="'JetBrains Mono', monospace">${discrepancyGap.label}</text>
       `;
     }
 
@@ -123,16 +123,22 @@ const Charts = (() => {
         ${gridLines}
 
         <!-- Discrepancy shaded area -->
-        <path d="${areaPath}" fill="rgba(239,68,68,.07)"/>
+        <path d="${areaPath}" fill="url(#discrepancyGrad)" opacity="0.8"/>
+        <defs>
+          <linearGradient id="discrepancyGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#ef4444" stop-opacity="0.15"/>
+            <stop offset="100%" stop-color="#ef4444" stop-opacity="0.02"/>
+          </linearGradient>
+        </defs>
 
         <!-- Lines -->
-        ${polyline(target, '#d4d4d8', true)}
-        ${polyline(contractorReport, '#a1a1aa', true)}
-        ${polyline(sanketTelemetry, '#000000')}
+        ${polyline(target, '#cbd5e1', 2, true)}
+        ${polyline(contractorReport, '#8b5cf6', 2.5)}
+        ${polyline(sanketTelemetry, '#0f172a', 3.5)}
 
         <!-- Data dots (sanket line) -->
         ${sanketTelemetry.map((v, i) => `
-          <circle cx="${xPos(i)}" cy="${yPos(v)}" r="3" fill="#000000" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="${xPos(i)}" cy="${yPos(v)}" r="3.5" fill="#0f172a" stroke="#fff" stroke-width="2"/>
           <circle cx="${xPos(i)}" cy="${yPos(v)}" r="14" fill="transparent" class="hover-target" style="cursor:crosshair;"
             data-month="${labels[i]}" 
             data-target="${(target[i] || 0).toFixed(1)}" 

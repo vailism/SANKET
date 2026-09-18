@@ -29,13 +29,7 @@ LOCAL_CACHE_DIR = os.environ.get("SANKET_CACHE_DIR", os.path.join(tempfile.gette
 # In-memory lock mechanism to prevent concurrent downloads
 _DOWNLOAD_LOCKS = set()
 
-def get_sha256(filepath: str) -> str:
-    """Calculate SHA-256 hash of a file for parity verification."""
-    sha256_hash = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        for byte_block in iter(lambda: f.read(4096), b""):
-            sha256_hash.update(byte_block)
-    return sha256_hash.hexdigest()
+
 
 def _download_from_gcs(gcs_blob_name: str, dest_path: str):
     """Download a file from GCS."""

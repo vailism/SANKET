@@ -21,8 +21,6 @@ import sys
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Any, Tuple
-import lightgbm as lgb
-from sklearn.metrics import average_precision_score, roc_auc_score, brier_score_loss, confusion_matrix
 
 from sanket.model import load_model_config, train_lgbm_model, predict_lgbm_probs
 

@@ -15,7 +15,7 @@ client = TestClient(app)
 
 @pytest.fixture
 def mock_gemini_client():
-    with patch("sanket.api.genai.Client") as mock_client_cls:
+    with patch("sanket.api._get_gemini_client") as mock_get_client:
         mock_client = MagicMock()
         mock_models = MagicMock()
         
@@ -33,8 +33,8 @@ def mock_gemini_client():
         mock_models.generate_content.return_value = mock_response
         
         mock_client.models = mock_models
-        mock_client_cls.return_value = mock_client
-        yield mock_client_cls
+        mock_get_client.return_value = mock_client
+        yield mock_get_client
 
 
 def test_ai_endpoint_validates_project_id():

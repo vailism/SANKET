@@ -105,8 +105,8 @@ def test_4_replay_endpoint(client):
     assert "alert_points" in data
     assert "actual_deterioration_event" in data
     assert "first_alert" in data
-    assert data["lead_time"] == 20
-    assert data["first_alert"]["alert_month"] == "2013-06"
+    assert data["lead_time"] == 30
+    assert data["first_alert"]["alert_month"] == "2010-11"
     assert data["first_alert"]["risk_tier"] == "WATCH"
 
 
